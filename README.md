@@ -99,3 +99,7 @@ Key parameters are defined in the learner files:
 - **Language confidence scale (σ)**: 1.2
 - **Capping factor**: 5.0 × feature difference
 - **LLM temperature**: 0.1 (attention), 0.3 (preference)
+
+## Acknowledgments
+
+This work builds upon concepts from the model switching framework: https://github.com/arjunsripathy/model_switching
