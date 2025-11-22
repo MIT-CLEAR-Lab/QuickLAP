@@ -102,4 +102,4 @@ Key parameters are defined in the learner files:
 
 ## Acknowledgments
 
-This work builds upon concepts from the model switching framework: https://github.com/arjunsripathy/model_switching
+This work builds upon model_switching repository: https://github.com/arjunsripathy/model_switching
