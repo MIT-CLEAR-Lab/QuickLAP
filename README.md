@@ -100,6 +100,23 @@ Key parameters are defined in the learner files:
 - **Capping factor**: 5.0 × feature difference
 - **LLM temperature**: 0.1 (attention), 0.3 (preference)
 
+
+## Citation
+
+If you find this repository useful, please cite:
+
+```bibtex
+@misc{nader2025quicklapquicklanguageactionpreference,
+      title={QuickLAP: Quick Language-Action Preference Learning for Autonomous Driving Agents}, 
+      author={Jordan Abi Nader and David Lee and Nathaniel Dennler and Andreea Bobu},
+      year={2025},
+      eprint={2511.17855},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2511.17855}, 
+}
+```
+
 ## Acknowledgments
 
 This work builds upon model_switching repository: https://github.com/arjunsripathy/model_switching
