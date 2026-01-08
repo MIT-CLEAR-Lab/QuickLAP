@@ -1,0 +1,7 @@
+logs/
+venv/
+.DS_Store
+.env
+__pycache__/
+*.txt
+results/
