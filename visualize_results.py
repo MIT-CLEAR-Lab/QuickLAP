@@ -303,7 +303,7 @@ def create_summary_table(results, environments, output_dir):
 def main():
     """Main visualization function."""
     # Load results
-    results_path = Path(__file__).parent / "logs/2026_01_05_01_32_47/results.json"
+    results_path = Path(__file__).parent / "logs/2026_01_08_20_36_53/results.json"
     print(f"Loading results from: {results_path}")
     results = load_results(results_path)
     

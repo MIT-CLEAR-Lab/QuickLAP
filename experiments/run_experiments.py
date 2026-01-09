@@ -50,12 +50,14 @@ EXPERIMENTS = {
     "cone_car_avoid_four": ConeCarAvoidExperimentFour,
 }
 UTTERANCES = [
-    ("Be careful.", "Be_careful"),
-    ("Watch out for that thing.", "Watch_out_thing"),
-    ("Stay away from that thing.", "Stay_away_thing"),
-    ("Avoid the obstacle.", "Avoid_obstacle"),
-    ("Stay away from construction zones.", "Stay_away_construction"),
-    ("Steer clear of the cone.", "Steer_clear_cone"),
+    # ("Be careful.", "Be_careful"),
+    # ("Watch out for that thing.", "Watch_out_thing"),
+    # ("Stay away from that thing.", "Stay_away_thing"),
+    # ("Avoid the obstacle.", "Avoid_obstacle"),
+    # ("Stay away from construction zones.", "Stay_away_construction"),
+    # ("Steer clear of the cone.", "Steer_clear_cone"),
+    ("Move.", "Move"),
+    ("uhh...", "Uhh"),
 ]
 LEARNER_FACTORIES = {
     "naive": lambda car, utterance: PHRILearner(car),
