@@ -31,8 +31,7 @@ class BaseRationalArm:
         """
         self.world = world
         
-        # Default base weights: [red_dist, green_dist, velocity, collision, joints]
-        # Low velocity weight (1.0) - this is the "wrong" preference
+        # TODO: This is old
         if weights is None:
             weights = np.array([1.0, 1.0, 1.0, 2.0, 2.0])
         

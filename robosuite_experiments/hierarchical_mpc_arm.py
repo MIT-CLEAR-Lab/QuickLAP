@@ -118,7 +118,7 @@ class HierarchicalMPCArm(BaseRationalArm):
         """
         Determine subgoal position and gripper state based on current phase.
         
-        USES EXACT SAME LOGIC AS intervention_arm.py for reliability!
+        SAME LOGIC AS intervention_arm.py for reliability
         
         Args:
             obs: Current observation
@@ -183,7 +183,7 @@ class HierarchicalMPCArm(BaseRationalArm):
                 print(f"[t={self.timestep}] *** ENTERING TRANSPORT PHASE - MPC WILL OPTIMIZE TO MOVE BLOCK TO ZONE B ***")
                 
         elif self.task_phase == "transport":
-            # **MPC PHASE**: Move block to zone B (MPC optimizes based on block_to_zone feature!)
+            # **MPC PHASE**: Move block to zone B (MPC optimizes based on block_to_zone feature)
             subgoal = zone_b_pos + np.array([0, 0, 0.15])  # Above zone B
             gripper = 1.0  # Keep gripper closed
             
@@ -388,7 +388,7 @@ class HierarchicalMPCArm(BaseRationalArm):
                 return action
         
         # Normal MPC operation for longer distances
-        # Don't pass subgoal to avoid initialization bias - let reward weights decide!
+        # Don't pass subgoal to avoid initialization bias 
         action = planner.get_next_action(obs, gripper_state, target_pos=None)
         
         # Clip to safe limits
