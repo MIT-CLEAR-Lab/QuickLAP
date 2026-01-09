@@ -70,6 +70,8 @@ class HierarchicalMPCArm(BaseRationalArm):
         self.recording = False
         self.robot_trajectory = []
         self.human_trajectory = []
+        self.robot_sim_state = None  # Simulated robot state for counterfactual trajectory
+        self.dt = 0.05  # 20Hz control rate
         
         # Task phase state machine
         self.task_phase = "approach"  # approach -> descend -> grasp -> lift -> transport -> place_descend -> release -> retract
@@ -409,22 +411,56 @@ class HierarchicalMPCArm(BaseRationalArm):
                 self.recording = True
                 self.robot_trajectory = []
                 self.human_trajectory = []
+                # Initialize simulated robot state from current observation
+                self.robot_sim_state = {
+                    "ee_pos": obs["ee_pos"].copy(),
+                    "ee_vel": obs["ee_vel"].copy(),
+                    "red_block_pos": obs["red_block_pos"].copy(),
+                }
                 print(f"[Timestep {self.timestep}] Started intervention: '{self.utterance}'")
+                print("  Initializing counterfactual robot trajectory simulation...")
             
-            # Get both actions
-            robot_action = self.get_robot_action(obs)
+            # Get robot action from SIMULATED robot state (counterfactual)
+            robot_obs = copy.deepcopy(obs)
+            robot_obs["ee_pos"] = self.robot_sim_state["ee_pos"]
+            robot_obs["ee_vel"] = self.robot_sim_state["ee_vel"]
+            robot_obs["red_block_pos"] = self.robot_sim_state["red_block_pos"]
+            robot_action = self.get_robot_action(robot_obs)
+            
+            # Get expert action from ACTUAL observation
             expert_action = self.get_expert_action(obs)
             
-            # Record trajectories
+            # Record robot trajectory (simulated state + robot action)
             self.robot_trajectory.append({
-                "obs": copy.deepcopy(obs),
+                "obs": copy.deepcopy(robot_obs),
                 "control": robot_action.copy()
             })
             
+            # Record human trajectory (actual state + expert action)
             self.human_trajectory.append({
                 "obs": copy.deepcopy(obs),
                 "control": expert_action.copy()
             })
+            
+            # Simulate robot dynamics forward for next timestep
+            from mpc_arm_planner import arm_dynamics_step
+            import tensorflow as tf
+            
+            ee_pos_tf = tf.constant(self.robot_sim_state["ee_pos"], dtype=tf.float32)
+            ee_vel_tf = tf.constant(self.robot_sim_state["ee_vel"], dtype=tf.float32)
+            control_tf = tf.constant(robot_action[:3], dtype=tf.float32)  # Only position control
+            
+            new_ee_pos, new_ee_vel = arm_dynamics_step(ee_pos_tf, ee_vel_tf, control_tf, self.dt)
+            
+            # Update simulated state
+            self.robot_sim_state["ee_pos"] = new_ee_pos.numpy()
+            self.robot_sim_state["ee_vel"] = new_ee_vel.numpy()
+            
+            # Block moves with EE if gripped
+            if self.task_phase in ["lift", "transport"]:
+                # Maintain grasp offset
+                grasp_offset = self.robot_sim_state["red_block_pos"] - (robot_obs["ee_pos"])
+                self.robot_sim_state["red_block_pos"] = self.robot_sim_state["ee_pos"] + grasp_offset
             
             return expert_action
         
@@ -432,6 +468,8 @@ class HierarchicalMPCArm(BaseRationalArm):
             # Check if we just finished intervention
             if self.recording:
                 print(f"[Timestep {self.timestep}] Ended intervention, updating weights...")
+                print(f"  Robot trajectory (counterfactual): {len(self.robot_trajectory)} states")
+                print(f"  Expert trajectory (actual): {len(self.human_trajectory)} states")
                 
                 # Convert to format expected by learner
                 robot_traj = {
@@ -451,6 +489,7 @@ class HierarchicalMPCArm(BaseRationalArm):
                 self.recording = False
                 self.robot_trajectory = []
                 self.human_trajectory = []
+                self.robot_sim_state = None  # Clear simulated state
             
             return self.get_robot_action(obs)
     

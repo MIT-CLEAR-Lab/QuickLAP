@@ -27,13 +27,14 @@ from robosuite_phri_learner import RobosuitePHRILearner
 def main():
     """Run experiment with hierarchical MPC and visualization."""
     print("="*70)
-    print("HIERARCHICAL MPC ARM - BASE BEHAVIOR (No Intervention)")
+    print("HIERARCHICAL MPC ARM - WITH INTERVENTION LEARNING")
     print("="*70)
     print("\nKey Features:")
     print("  1. Phase-based task sequencing (approach → grasp → transport → release)")
     print("  2. MPC motion planning during transport phase")
     print("  3. 6 features including 'block_to_target_zone' and 'zone_c_proximity'")
-    print("  4. Base weights - no learning or intervention")
+    print("  4. Human intervention at t=800-900 to demonstrate expert behavior")
+    print("  5. Weight learning from intervention using PHRI")
     print()
     print("Note: On macOS, this requires mjpython!")
     print()
@@ -53,24 +54,29 @@ def main():
     # Note: zone_c_prox has NEGATIVE weight to avoid obstacle zone C
     base_weights = np.array([1.0, 1.0, 2.0, 2.0, 10.0, -2.0])
     
-    print("Creating Hierarchical MPC Arm (No Intervention)...")
-    print(f"  - Weights: {base_weights}")
+    print("Creating Hierarchical MPC Arm with Learning...")
+    print(f"  - Base weights: {base_weights}")
     print("    [green_dist, velocity, collision, joints, block_to_zone, zone_c_prox]")
-    print("    Note: zone_c_prox is NEGATIVE to avoid obstacle zone")
+    print("  - Intervention: t=800-900 during transport phase")
+    print("  - Utterance: 'Go faster and avoid zone C'")
     print()
 
-    # Create hierarchical MPC arm (no intervention - just base behavior)
+    # Create hierarchical MPC arm first without learner
     arm = HierarchicalMPCArm(
         world=world,
-        learner=None,  # No learning
-        utterance=None,
-        expert_weights=None,  # Not needed without intervention
-        intervention_interval=(999999, 999999),  # No intervention 
+        learner=None,  # Will set after creation
+        utterance="Go faster",
+        expert_weights=np.array([3.0, 5.0, 2.0, 2.0, 10.0, 4.0]),  # Expert preferences
+        intervention_interval=(99999, 99999),  # Intervention during transport 
         base_weights=base_weights,
         seed=42,
         planner_horizon=8,   # Short horizon for speed
         planner_n_iter=20,   # More iterations needed when starting from zero
     )
+    
+    # Now create learner with the arm
+    learner = RobosuitePHRILearner(arm, log_file="learning_log_robosuite.txt")
+    arm.learner = learner
     
     print("Feature descriptions:")
     for i, (name, desc) in enumerate(arm.get_feature_descriptions().items()):
