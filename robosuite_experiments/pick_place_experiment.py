@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from arm_world import ArmWorld
 from intervention_arm import InterventionArm
+from robosuite.devices import Keyboard
 
 
 class PickPlaceExperiment:
@@ -32,6 +33,8 @@ class PickPlaceExperiment:
         save_dir: str | None = None,
         verbose: bool = False,
         horizon: int = 300,  # Increased from 150 to give more time for task
+        use_physical_input: bool = False,
+        input_sensitivity: float = 1.0,
     ):
         """
         Initialize the experiment.
@@ -41,10 +44,14 @@ class PickPlaceExperiment:
             save_dir: Directory to save results (auto-generated if None)
             verbose: Whether to print detailed logs
             horizon: Episode length in timesteps
+            use_physical_input: Whether to enable keyboard input for human intervention
+            input_sensitivity: Sensitivity for keyboard input (default: 1.0)
         """
         self.exp_name = exp_name
         self.verbose = verbose
         self.horizon = horizon
+        self.use_physical_input = use_physical_input
+        self.input_sensitivity = input_sensitivity
         
         # Set up save directory
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -54,6 +61,7 @@ class PickPlaceExperiment:
         os.makedirs(self.save_dir, exist_ok=True)
         
         self.step_data = []
+        self.keyboard_device = None
     
     def setup_world(
         self,
@@ -72,9 +80,12 @@ class PickPlaceExperiment:
         Returns:
             Tuple of (world, arm)
         """
+        # Enable renderer if using physical input (need visual feedback)
+        use_renderer = self.verbose or self.use_physical_input
+        
         # Create world
         world = ArmWorld(
-            has_renderer=self.verbose,
+            has_renderer=use_renderer,
             has_offscreen_renderer=False,
             use_camera_obs=False,
             control_freq=20,
@@ -86,9 +97,16 @@ class PickPlaceExperiment:
         # Learner factory expects an arm-like object with weights and features
         # We'll pass a temporary arm to get the learner, then create the real arm
         
-        # Expert weights: [red_dist, green_dist, velocity, collision, joints]
-        expert_weights = np.array([1.0, 1.0, 10.0, 2.0, 2.0])
+        # Base weights for robot (initial policy)
         base_weights = np.array([1.0, 1.0, 1.0, 2.0, 2.0])
+        
+        if self.use_physical_input:
+            # When using physical input, human IS the expert
+            # No simulated expert weights - set to None to indicate human control
+            expert_weights = None
+        else:
+            # Simulated expert weights: [red_dist, green_dist, velocity, collision, joints]
+            expert_weights = np.array([1.0, 1.0, 10.0, 2.0, 2.0])
         
         # Create arm first without learner
         arm = InterventionArm(
@@ -150,7 +168,8 @@ class PickPlaceExperiment:
         """
         Evaluate overall performance.
         
-        Uses cumulative reward based on expert weights as metric.
+        When using simulated expert: uses cumulative reward based on expert weights.
+        When using physical input: uses cumulative reward based on current learned weights.
         
         Args:
             arm: InterventionArm instance
@@ -158,15 +177,20 @@ class PickPlaceExperiment:
         Returns:
             Performance metric (higher is better)
         """
-        # Compute cumulative reward using expert weights
         feature_trajectory = self.get_feature_trajectory()
         
         if len(feature_trajectory) == 0:
             return 0.0
         
-        # Sum of rewards using expert weights
-        expert_rewards = feature_trajectory @ arm.expert_weights
-        return float(np.sum(expert_rewards))
+        if self.use_physical_input or arm.expert_weights is None:
+            # Physical input mode: evaluate using current learned weights
+            # (no ground-truth expert weights since human is the expert)
+            rewards = feature_trajectory @ arm.weights
+        else:
+            # Simulated expert mode: evaluate using expert weights
+            rewards = feature_trajectory @ arm.expert_weights
+            
+        return float(np.sum(rewards))
     
     def save_results(self, metric: float):
         """
@@ -208,11 +232,24 @@ class PickPlaceExperiment:
         """
         print(f"\nStarting {self.exp_name} experiment...")
         print(f"Seed: {seed}, Utterance: '{utterance}'")
+        if self.use_physical_input:
+            print("Physical input ENABLED (robosuite keyboard)")
         print(f"Results will be saved to: {self.save_dir}")
         
         # Set up environment and arm
         self.step_data = []
         world, arm = self.setup_world(learner_factory, seed, utterance)
+        
+        # Initialize robosuite's built-in keyboard device if enabled
+        if self.use_physical_input:
+            self.keyboard_device = Keyboard(
+                env=world.env,
+                pos_sensitivity=self.input_sensitivity,
+                rot_sensitivity=self.input_sensitivity * 0.5,
+            )
+            # Wire up keyboard callback to the viewer
+            world.env.viewer.add_keypress_callback(self.keyboard_device.on_press)
+            print("Keyboard input initialized. Click on viewer window to focus!")
         
         # Save experiment configuration
         config = {
@@ -221,9 +258,11 @@ class PickPlaceExperiment:
             "seed": seed,
             "utterance": utterance,
             "horizon": self.horizon,
+            "use_physical_input": self.use_physical_input,
             "arm_config": {
                 "initial_weights": arm.weights.tolist(),
-                "expert_weights": arm.expert_weights.tolist(),
+                # expert_weights is None when using physical input (human is the expert)
+                "expert_weights": arm.expert_weights.tolist() if arm.expert_weights is not None else "human",
                 "intervention_interval": [arm.intervention_start, arm.intervention_end],
             },
         }
@@ -239,8 +278,40 @@ class PickPlaceExperiment:
         try:
             print("\nRunning simulation...")
             for t in range(self.horizon):
-                # Get action from arm
-                action = arm.get_action(obs)
+                # Get robot's planned action (before human input)
+                robot_action = arm.get_action(obs)
+                action = robot_action.copy()
+                
+                # Add keyboard input if enabled (robosuite built-in device)
+                # Only allow physical input during TRANSPORT/MOVE phase (when human guidance matters)
+                # Skip first 10 frames to let keyboard device initialize (avoid false positives)
+                in_transport_phase = arm.task_phase in ["transport", "move"]
+                if self.use_physical_input and self.keyboard_device and t >= 10 and in_transport_phase:
+                    # Get human input from keyboard device
+                    # Returns dict with 'right_delta' (6,) and 'right_gripper' keys
+                    device_action = self.keyboard_device.input2action()
+                    
+                    if device_action is not None:
+                        right_delta = device_action.get("right_delta", np.zeros(6))
+                        right_gripper = device_action.get("right_gripper", 0)
+                        if isinstance(right_gripper, np.ndarray):
+                            right_gripper = float(right_gripper.item()) if right_gripper.size == 1 else 0
+                        
+                        # Check if human is actively providing input (position/orientation only)
+                        # Use higher thresholds to avoid false positives from device noise
+                        # NOTE: We ignore gripper input during transport - robot must keep holding the block
+                        delta_magnitude = np.linalg.norm(right_delta)
+                        if delta_magnitude > 0.01:
+                            # Apply human correction to position/orientation ONLY
+                            # Do NOT override gripper - robot needs to keep it closed during transport
+                            action[:6] += right_delta
+                            
+                            # Signal intervention for learning
+                            arm.signal_physical_intervention(obs, robot_action, action)
+                
+                # Update intervention state (handles cooldown and triggers learning)
+                if self.use_physical_input:
+                    arm.update_physical_intervention_state()
                 
                 # Step environment
                 obs, _, done, _ = world.step(action)
@@ -249,8 +320,8 @@ class PickPlaceExperiment:
                 metrics = self.get_metrics(t, arm, obs)
                 self.step_data.append(metrics)
                 
-                # Render if verbose
-                if self.verbose:
+                # Render if verbose (required for visual feedback with physical input)
+                if self.verbose or self.use_physical_input:
                     world.render()
                 
                 # Print progress
@@ -280,6 +351,7 @@ class PickPlaceExperiment:
             print(f"Experiment completed. Results saved to {self.save_dir}")
             
             # Clean up
+            self.keyboard_device = None
             world.close()
         
         return performance_metric, feature_trajectory, final_learned_weights
@@ -287,11 +359,29 @@ class PickPlaceExperiment:
 
 def main():
     """Test the experiment with a simple learner."""
+    import argparse
     from robosuite_phri_learner import RobosuitePHRILearner
     
-    # Use verbose=False to avoid renderer issues on Mac
+    parser = argparse.ArgumentParser(description="Run pick-place experiment")
+    parser.add_argument(
+        "--physical-input", 
+        action="store_true",
+        help="Enable keyboard input for human intervention"
+    )
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        default=100,
+        help="Episode length in timesteps"
+    )
+    args = parser.parse_args()
+    
     # If you want visualization, run with: mjpython pick_place_experiment.py
-    experiment = PickPlaceExperiment(verbose=False, horizon=100)
+    experiment = PickPlaceExperiment(
+        verbose=False, 
+        horizon=args.horizon,
+        use_physical_input=args.physical_input,
+    )
     
     def learner_factory(arm):
         return RobosuitePHRILearner(arm, log_file="robosuite_test.txt")

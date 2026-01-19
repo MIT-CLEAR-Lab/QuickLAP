@@ -11,6 +11,11 @@ from base_rational_arm import BaseRationalArm
 from arm_world import ArmWorld
 from mpc_arm_planner import MPCArmPlanner
 import arm_feature_utils as feature_utils
+from arm_feature_utils import (
+    DEFAULT_BASE_WEIGHTS,
+    DEFAULT_EXPERT_WEIGHTS,
+    FEATURE_NAMES,
+)
 
 
 class HierarchicalMPCArm(BaseRationalArm):
@@ -40,27 +45,29 @@ class HierarchicalMPCArm(BaseRationalArm):
             world: ArmWorld environment instance
             learner: PHRILearner instance for learning from interventions
             utterance: What the human says during intervention
-            expert_weights: Weights representing expert's true preferences (6 features)
+            expert_weights: Weights representing expert's true preferences (7 features)
             intervention_interval: Tuple (start, end) for intervention timesteps
-            base_weights: Initial weights (6 features)
+            base_weights: Initial weights (7 features)
             seed: Random seed
             planner_horizon: MPC planning horizon
             planner_n_iter: Number of MPC optimization iterations
         """
-        # Initialize with base weights - now 6 features (removed red_dist)
+        # Initialize with base weights - uses centralized defaults from arm_feature_utils
         if base_weights is None:
-            # [green_dist, velocity, collision, joints, block_to_zone, zone_c_prox]
-            base_weights = np.array([1.0, 1.0, 2.0, 2.0, 1.0, 2.0])
+            base_weights = DEFAULT_BASE_WEIGHTS.copy()
         
         super().__init__(world, weights=base_weights, seed=seed)
         
         self.learner = learner
         self.utterance = utterance
         
-        # Expert weights: high velocity (10x), high block_to_zone (5x), closer to zone C unintentionally (2x)
+        # Expert weights: None means human physical input is the expert
+        # Otherwise, use provided weights (or defaults) for simulated expert
         if expert_weights is None:
-            expert_weights = np.array([1.0, 10.0, 2.0, 2.0, 5.0, 2.0])
-        self.expert_weights = np.array(expert_weights, dtype=np.float32)
+            # Human is the expert - no simulated expert weights
+            self.expert_weights = None
+        else:
+            self.expert_weights = np.array(expert_weights, dtype=np.float32)
         
         # Single intervention period
         self.intervention_start, self.intervention_end = intervention_interval
@@ -72,6 +79,12 @@ class HierarchicalMPCArm(BaseRationalArm):
         self.human_trajectory = []
         self.robot_sim_state = None  # Simulated robot state for counterfactual trajectory
         self.dt = 0.05  # 20Hz control rate
+        
+        # Physical input intervention tracking
+        self.physical_intervention_active = False
+        self.physical_intervention_cooldown = 0  # Timesteps since last input
+        self.cooldown_threshold = 30  # End intervention after N frames of no input (1.5 sec at 20Hz)
+        self.physical_robot_sim_state = None  # Simulated robot state for counterfactual
         
         # Task phase state machine
         self.task_phase = "approach"  # approach -> descend -> grasp -> lift -> transport -> place_descend -> release -> retract
@@ -108,13 +121,122 @@ class HierarchicalMPCArm(BaseRationalArm):
             obs: Observation dictionary from environment
             
         Returns:
-            numpy array of feature values [6 features]
+            numpy array of feature values [7 features]
         """
         return feature_utils.compute_features(obs, include_red_dist=False, include_zones=True)
     
     def is_intervention(self):
-        """Check if current timestep is within intervention period."""
+        """
+        Check if currently in intervention period.
+        
+        Supports both simulated (time-based) and physical (human input) interventions.
+        """
+        # Physical intervention mode
+        if self.physical_intervention_active:
+            return True
+        
+        # Simulated intervention (time-based)
         return self.intervention_start <= self.timestep <= self.intervention_end
+    
+    def signal_physical_intervention(self, obs, robot_action, human_action):
+        """
+        Signal that human is physically intervening with a correction.
+        
+        This should be called each timestep when human input is non-zero.
+        Tracks both robot's planned action and human's modified action.
+        Simulates counterfactual robot trajectory for proper feature comparison.
+        
+        Args:
+            obs: Current observation (actual state after human's previous action)
+            robot_action: What the robot would have done (before human input)
+            human_action: What the robot will actually do (with human correction)
+        """
+        if not self.physical_intervention_active:
+            # Start new intervention
+            self.physical_intervention_active = True
+            self.recording = True
+            self.robot_trajectory = []
+            self.human_trajectory = []
+            # Initialize simulated robot state from current observation
+            self.physical_robot_sim_state = {
+                "ee_pos": obs["ee_pos"].copy(),
+                "ee_vel": obs["ee_vel"].copy(),
+                "red_block_pos": obs["red_block_pos"].copy(),
+            }
+            print(f"[Timestep {self.timestep}] Physical intervention started (provide utterance when done)")
+        
+        # Reset cooldown timer
+        self.physical_intervention_cooldown = 0
+        
+        # Create counterfactual robot observation (what robot would see without human input)
+        robot_obs = copy.deepcopy(obs)
+        robot_obs["ee_pos"] = self.physical_robot_sim_state["ee_pos"].copy()
+        robot_obs["ee_vel"] = self.physical_robot_sim_state["ee_vel"].copy()
+        robot_obs["red_block_pos"] = self.physical_robot_sim_state["red_block_pos"].copy()
+        
+        # Record trajectories
+        # Robot trajectory: counterfactual state (simulated without human input)
+        self.robot_trajectory.append({
+            "obs": robot_obs,
+            "control": robot_action.copy()
+        })
+        # Human trajectory: actual state (with human input applied)
+        self.human_trajectory.append({
+            "obs": copy.deepcopy(obs),
+            "control": human_action.copy()
+        })
+        
+        # Update simulated robot state for next timestep
+        # Simple dynamics: ee_pos += action[:3] * dt
+        dt = 0.05  # 20Hz control
+        self.physical_robot_sim_state["ee_vel"] = robot_action[:3].copy()
+        self.physical_robot_sim_state["ee_pos"] = self.physical_robot_sim_state["ee_pos"] + robot_action[:3] * dt
+        
+        # Block follows EE during transport (assuming grasped)
+        if self.task_phase in ["transport", "move"]:
+            # Keep block attached to simulated EE
+            block_offset = obs["red_block_pos"] - obs["ee_pos"]  # Current grasp offset
+            self.physical_robot_sim_state["red_block_pos"] = self.physical_robot_sim_state["ee_pos"] + block_offset
+    
+    def update_physical_intervention_state(self):
+        """
+        Update physical intervention state each timestep.
+        
+        Call this AFTER signal_physical_intervention (or when no human input).
+        Ends intervention after cooldown_threshold timesteps of no human input.
+        Computes feature difference over full trajectories and updates weights.
+        """
+        if self.physical_intervention_active:
+            self.physical_intervention_cooldown += 1
+            
+            if self.physical_intervention_cooldown >= self.cooldown_threshold:
+                # End intervention
+                print(f"\n[Timestep {self.timestep}] Physical intervention ended!")
+                print(f"  Recorded {len(self.robot_trajectory)} timesteps of intervention")
+                print(f"  Utterance: '{self.utterance}'")
+                
+                if len(self.robot_trajectory) > 0 and self.learner is not None:
+                    # Convert to format expected by learner
+                    # Full trajectories for feature computation
+                    robot_traj = {
+                        "state": [step["obs"] for step in self.robot_trajectory],
+                        "control": [step["control"] for step in self.robot_trajectory]
+                    }
+                    human_traj = {
+                        "state": [step["obs"] for step in self.human_trajectory],
+                        "control": [step["control"] for step in self.human_trajectory]
+                    }
+                    
+                    # Update weights via learner (computes feature diff over full trajectories)
+                    self.learner.update_weights(robot_traj, human_traj)
+                    print(f"Updated weights: {self.weights}")
+                
+                # Reset state
+                self.physical_intervention_active = False
+                self.recording = False
+                self.robot_trajectory = []
+                self.human_trajectory = []
+                self.physical_robot_sim_state = None
     
     def _get_subgoal_and_gripper(self, obs):
         """
@@ -271,10 +393,16 @@ class HierarchicalMPCArm(BaseRationalArm):
             zone_dist = np.linalg.norm(obs["red_block_pos"] - obs["zone_b_pos"])
             gripper_str = "CLOSED" if gripper_state > 0 else "open"
             
+            # Compute and print features
+            features = self.features(obs)
+            feature_names = FEATURE_NAMES
+            feature_str = ", ".join([f"{name}={val:.3f}" for name, val in zip(feature_names, features)])
+            
             if self.task_phase in ["grasp", "release"]:
                 wait_time = self.timestep - (self.grasp_start_time if self.task_phase == "grasp" else self.release_start_time)
                 print(f"[t={self.timestep}] Phase: {self.task_phase} (waiting... {wait_time}/80), "
                       f"gripper={gripper_str}")
+                print(f"  Features: {feature_str}")
             elif self.task_phase == "lift":
                 # Special debug for lift phase
                 if self.initial_block_pos is not None:
@@ -290,6 +418,7 @@ class HierarchicalMPCArm(BaseRationalArm):
                           f"block_to_zone={zone_dist:.3f}m, "
                           f"action_mag={np.linalg.norm(action[:3]):.3f}, "
                           f"gripper={gripper_str}")
+                print(f"  Features: {feature_str}")
             else:
                 # Add block height for transport phase debugging
                 if self.task_phase == "transport":
@@ -300,6 +429,8 @@ class HierarchicalMPCArm(BaseRationalArm):
                           f"block_to_zone={zone_dist:.3f}m, "
                           f"action_mag={np.linalg.norm(action[:3]):.3f}, "
                           f"gripper={gripper_str}")
+                    print(f"  Features: {feature_str}")
+                    print(f"  Weights:  {self.weights}")
                 else:
                     print(f"[t={self.timestep}] Phase: {self.task_phase}, "
                           f"red_dist={red_dist:.3f}m, "
@@ -403,9 +534,18 @@ class HierarchicalMPCArm(BaseRationalArm):
     def get_action(self, obs):
         """
         Get action for current timestep, handling interventions.
+        
+        For physical intervention: just returns robot action (human correction added externally)
+        For simulated intervention: uses counterfactual simulation
         """
         self.timestep += 1
         
+        # Physical intervention: just return robot action (correction added externally)
+        # The trajectory tracking is done via signal_physical_intervention()
+        if self.physical_intervention_active:
+            return self.get_robot_action(obs)
+        
+        # Simulated intervention: use counterfactual simulation
         if self.is_intervention():
             if not self.recording:
                 self.recording = True

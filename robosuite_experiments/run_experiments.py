@@ -20,8 +20,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pick_place_experiment import PickPlaceExperiment
 from robosuite_phri_learner import RobosuitePHRILearner
-from interact_drive.learner.masked_learner import MaskedLLMPHRILearner
-from interact_drive.learner.adapt_gated_llm_learner import AdaptGatedLLMPHRILearner
+from robosuite_learners import (
+    RobosuiteMaskedLLMPHRILearner,
+    RobosuiteAdaptGatedLLMPHRILearner,
+)
 from interact_drive.learner.oracle_learner import OracleLearner
 
 
@@ -48,6 +50,11 @@ parser.add_argument(
     default="",
     help="Notes for the experiment, to be saved in the log",
 )
+parser.add_argument(
+    "--physical-input",
+    action="store_true",
+    help="Enable keyboard input for human intervention",
+)
 args = parser.parse_args()
 
 # Get OpenAI API key
@@ -63,29 +70,29 @@ UTTERANCES = [
     ("Go faster", "Go_faster"),
 ]
 
-# Define learner factories
+# Define learner factories (using robosuite-compatible versions)
 LEARNER_FACTORIES = {
     "naive": lambda arm, utterance: RobosuitePHRILearner(
         arm, log_file=f"logs/robosuite_naive_{utterance}.txt"
     ),
-    "masked_dphi": lambda arm, utterance: MaskedLLMPHRILearner(
+    "masked_dphi": lambda arm, utterance: RobosuiteMaskedLLMPHRILearner(
         arm,
         utterance,
         arm.get_feature_descriptions(),
         openai_api_key=api_key,
         selector="d_phi",
     ),
-    "adapt_gated_llm": lambda arm, utterance: AdaptGatedLLMPHRILearner(
+    "adapt_gated_llm": lambda arm, utterance: RobosuiteAdaptGatedLLMPHRILearner(
         arm, utterance, arm.get_feature_descriptions(), openai_api_key=api_key
     ),
-    "quicklap_language_only": lambda arm, utterance: AdaptGatedLLMPHRILearner(
+    "quicklap_language_only": lambda arm, utterance: RobosuiteAdaptGatedLLMPHRILearner(
         arm,
         utterance,
         arm.get_feature_descriptions(),
         openai_api_key=api_key,
         method=2,
     ),
-    "no_feature_context_language_only": lambda arm, utterance: AdaptGatedLLMPHRILearner(
+    "no_feature_context_language_only": lambda arm, utterance: RobosuiteAdaptGatedLLMPHRILearner(
         arm,
         utterance,
         arm.get_feature_descriptions(),
@@ -183,7 +190,10 @@ for world_name, world_cls in EXPERIMENTS.items():
     
     for seed in experiment_seeds:
         print(f"  Seed {seed}...")
-        experiment = world_cls(exp_name=f"{world_name}_oracle")
+        experiment = world_cls(
+            exp_name=f"{world_name}_oracle",
+            use_physical_input=args.physical_input,
+        )
         
         reward, feature_trajectory, learned_weights = experiment.run(
             oracle_factory, int(seed)
@@ -216,7 +226,10 @@ for world_name, world_cls in EXPERIMENTS.items():
             
             for seed in experiment_seeds:
                 print(f"  Seed {seed}...")
-                experiment = world_cls(exp_name=f"{world_name}_{run_name}")
+                experiment = world_cls(
+                    exp_name=f"{world_name}_{run_name}",
+                    use_physical_input=args.physical_input,
+                )
                 
                 reward, feature_trajectory, learned_weights = experiment.run(
                     lambda arm: learner_factory(arm, utterance_text),

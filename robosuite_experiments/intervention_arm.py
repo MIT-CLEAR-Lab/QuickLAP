@@ -34,7 +34,8 @@ class InterventionArm(BaseRationalArm):
             world: ArmWorld environment instance
             learner: PHRILearner instance for learning from interventions
             utterance: What the human says during intervention
-            expert_weights: Weights representing expert's true preferences
+            expert_weights: Weights representing expert's true preferences.
+                           If None, assumes human physical input is the expert.
             intervention_interval: Tuple (start, end) for intervention timesteps
             base_weights: Initial weights (wrong preferences)
             seed: Random seed
@@ -48,12 +49,15 @@ class InterventionArm(BaseRationalArm):
         self.learner = learner
         self.utterance = utterance
         
-        # Expert weights: high velocity (10x), others normal
-        if expert_weights is None:
-            expert_weights = np.array([1.0, 1.0, 10.0, 2.0, 2.0])
-        self.expert_weights = np.array(expert_weights, dtype=np.float32)
+        # Expert weights: None means human physical input is the expert
+        # Otherwise, use provided weights for simulated expert
+        if expert_weights is not None:
+            self.expert_weights = np.array(expert_weights, dtype=np.float32)
+        else:
+            # Human is the expert - no simulated expert weights
+            self.expert_weights = None
         
-        # Single intervention period
+        # Single intervention period (only used for simulated interventions)
         self.intervention_start, self.intervention_end = intervention_interval
         
         # Tracking variables
@@ -62,16 +66,133 @@ class InterventionArm(BaseRationalArm):
         self.robot_trajectory = []
         self.human_trajectory = []
         
+        # Physical input intervention tracking
+        self.physical_intervention_active = False
+        self.physical_intervention_cooldown = 0  # Timesteps since last input
+        self.cooldown_threshold = 30  # End intervention after N frames of no input (1.5 sec at 20Hz)
+        self.physical_robot_sim_state = None  # Simulated robot state for counterfactual
+        
         # State machine for pick-and-place task (no backwards transitions!)
         self.task_phase = "approach"  # approach -> descend -> grasp -> lift -> move -> place_descend -> release -> retract
         self.grasp_start_time = None  # Track when grasping started
         self.release_start_time = None  # Track when release started
     
     def is_intervention(self):
-        """Check if current timestep is within intervention period."""
-        # DISABLED FOR NOW - return False to see base behavior
+        """
+        Check if currently in intervention period.
+        
+        Supports both simulated (time-based) and physical (human input) interventions.
+        For physical input, use signal_physical_intervention() to trigger.
+        """
+        # Physical intervention mode
+        if self.physical_intervention_active:
+            return True
+        
+        # Simulated intervention (time-based)
+        if self.expert_weights is not None:
+            return self.intervention_start <= self.timestep <= self.intervention_end
+        
         return False
-        # return self.intervention_start <= self.timestep <= self.intervention_end
+    
+    def signal_physical_intervention(self, obs, robot_action, human_action):
+        """
+        Signal that human is physically intervening with a correction.
+        
+        This should be called each timestep when human input is non-zero.
+        Tracks both robot's planned action and human's modified action.
+        Simulates counterfactual robot trajectory for proper feature comparison.
+        
+        Args:
+            obs: Current observation (actual state after human's previous action)
+            robot_action: What the robot would have done (before human input)
+            human_action: What the robot will actually do (with human correction)
+        """
+        if not self.physical_intervention_active:
+            # Start new intervention
+            self.physical_intervention_active = True
+            self.recording = True
+            self.robot_trajectory = []
+            self.human_trajectory = []
+            # Initialize simulated robot state from current observation
+            self.physical_robot_sim_state = {
+                "ee_pos": obs["ee_pos"].copy(),
+                "ee_vel": obs["ee_vel"].copy(),
+                "red_block_pos": obs["red_block_pos"].copy(),
+            }
+            print(f"[Timestep {self.timestep}] Physical intervention started (provide utterance when done)")
+        
+        # Reset cooldown timer
+        self.physical_intervention_cooldown = 0
+        
+        # Create counterfactual robot observation (what robot would see without human input)
+        robot_obs = copy.deepcopy(obs)
+        robot_obs["ee_pos"] = self.physical_robot_sim_state["ee_pos"].copy()
+        robot_obs["ee_vel"] = self.physical_robot_sim_state["ee_vel"].copy()
+        robot_obs["red_block_pos"] = self.physical_robot_sim_state["red_block_pos"].copy()
+        
+        # Record trajectories
+        # Robot trajectory: counterfactual state (simulated without human input)
+        self.robot_trajectory.append({
+            "obs": robot_obs,
+            "control": robot_action.copy()
+        })
+        # Human trajectory: actual state (with human input applied)
+        self.human_trajectory.append({
+            "obs": copy.deepcopy(obs),
+            "control": human_action.copy()
+        })
+        
+        # Update simulated robot state for next timestep
+        # Simple dynamics: ee_pos += action[:3] * dt
+        dt = 0.05  # 20Hz control
+        self.physical_robot_sim_state["ee_vel"] = robot_action[:3].copy()
+        self.physical_robot_sim_state["ee_pos"] = self.physical_robot_sim_state["ee_pos"] + robot_action[:3] * dt
+        
+        # Block follows EE during transport (assuming grasped)
+        if self.task_phase in ["transport", "move"]:
+            # Keep block attached to simulated EE
+            block_offset = obs["red_block_pos"] - obs["ee_pos"]  # Current grasp offset
+            self.physical_robot_sim_state["red_block_pos"] = self.physical_robot_sim_state["ee_pos"] + block_offset
+    
+    def update_physical_intervention_state(self):
+        """
+        Update physical intervention state each timestep.
+        
+        Call this AFTER signal_physical_intervention (or when no human input).
+        Ends intervention after cooldown_threshold timesteps of no human input.
+        Computes feature difference over full trajectories and updates weights.
+        """
+        if self.physical_intervention_active:
+            self.physical_intervention_cooldown += 1
+            
+            if self.physical_intervention_cooldown >= self.cooldown_threshold:
+                # End intervention
+                print(f"\n[Timestep {self.timestep}] Physical intervention ended!")
+                print(f"  Recorded {len(self.robot_trajectory)} timesteps of intervention")
+                print(f"  Utterance: '{self.utterance}'")
+                
+                if len(self.robot_trajectory) > 0 and self.learner is not None:
+                    # Convert to format expected by learner
+                    # Full trajectories for feature computation
+                    robot_traj = {
+                        "state": [step["obs"] for step in self.robot_trajectory],
+                        "control": [step["control"] for step in self.robot_trajectory]
+                    }
+                    human_traj = {
+                        "state": [step["obs"] for step in self.human_trajectory],
+                        "control": [step["control"] for step in self.human_trajectory]
+                    }
+                    
+                    # Update weights via learner (computes feature diff over full trajectories)
+                    self.learner.update_weights(robot_traj, human_traj)
+                    print(f"Updated weights: {self.weights}")
+                
+                # Reset state
+                self.physical_intervention_active = False
+                self.recording = False
+                self.robot_trajectory = []
+                self.human_trajectory = []
+                self.physical_robot_sim_state = None
     
     def get_expert_action(self, obs):
         """
@@ -336,8 +457,8 @@ class InterventionArm(BaseRationalArm):
         """
         Get action for current timestep, handling interventions.
         
-        During intervention: use expert action and record both trajectories.
-        Outside intervention: use robot's normal action.
+        For physical intervention: just returns robot action (human correction added externally)
+        For simulated intervention: uses expert action and records both trajectories.
         
         Args:
             obs: Current observation
@@ -347,6 +468,12 @@ class InterventionArm(BaseRationalArm):
         """
         self.timestep += 1
         
+        # Physical intervention: just return robot action (correction added externally)
+        # The trajectory tracking is done via signal_physical_intervention()
+        if self.physical_intervention_active:
+            return self.get_robot_action(obs)
+        
+        # Simulated intervention
         if self.is_intervention():
             if not self.recording:
                 # Start recording

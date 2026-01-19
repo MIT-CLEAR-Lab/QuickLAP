@@ -165,7 +165,7 @@ class MPCArmPlanner(ArmPlanner):
             green_block_pos: Green block position
             joint_pos: Joint positions
             joint_limits: Joint limits tuple
-            zone_b_pos: Target zone B position (optional, for 6/7-feature version)
+            zone_b_pos: Target zone B position (optional, for 7-feature version)
             zone_c_pos: Obstacle zone C position (optional, for 7-feature version)
             
         Returns:
@@ -180,11 +180,25 @@ class MPCArmPlanner(ArmPlanner):
         feat_collision = feature_utils.collision_safety(ee_pos, green_block_pos)
         feat_joints = feature_utils.joint_safety(joint_pos, joint_limits)
         
-        # Check if we have 6, 5, or 4 features
+        # Check if we have 7, 6, 5, or 4 features
         num_weights = len(self.arm.weights)
         
-        if num_weights == 6 and zone_b_pos is not None and zone_c_pos is not None:
-            # 6 features: includes block_to_zone and zone_c (no red_dist)
+        if num_weights == 7 and zone_b_pos is not None and zone_c_pos is not None:
+            # 7 features: includes block_to_zone, zone_c, and height_maintain
+            feat_block_to_zone = feature_utils.distance_block_to_target_zone(red_block_pos, zone_b_pos)
+            feat_zone_c_proximity = feature_utils.proximity_to_obstacle_zone(ee_pos, zone_c_pos)
+            feat_height = feature_utils.maintain_transport_height(ee_pos)
+            features = tf.stack([
+                feat_green_dist,
+                feat_velocity,
+                feat_collision,
+                feat_joints,
+                feat_block_to_zone,
+                feat_zone_c_proximity,
+                feat_height
+            ])
+        elif num_weights == 6 and zone_b_pos is not None and zone_c_pos is not None:
+            # 6 features: includes block_to_zone and zone_c (no height_maintain)
             feat_block_to_zone = feature_utils.distance_block_to_target_zone(red_block_pos, zone_b_pos)
             feat_zone_c_proximity = feature_utils.proximity_to_obstacle_zone(ee_pos, zone_c_pos)
             features = tf.stack([
@@ -260,6 +274,7 @@ class MPCArmPlanner(ArmPlanner):
             # No target provided - initialize with small RANDOM perturbation
             # This avoids NaN gradients from starting at exactly zero (constant reward problem)
             # Random gives MPC a starting point to explore without directional bias
+            # TODO: Better initialization strategy?
             random_init = np.random.uniform(-0.02, 0.02, size=self.horizon * self.NC)
             self.robot_control.assign(random_init.astype(np.float32))
         

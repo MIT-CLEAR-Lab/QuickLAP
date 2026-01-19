@@ -9,6 +9,52 @@ import numpy as np
 import tensorflow as tf
 
 
+# =============================================================================
+# CENTRALIZED WEIGHT CONSTANTS (SINGLE SOURCE OF TRUTH)
+# =============================================================================
+# Feature order for pick-and-place (7 features):
+# [green_dist, velocity, collision, joints, block_to_zone, zone_c_prox, height_maintain]
+#
+# Feature semantics:
+#   - green_dist: Higher = closer to green block (obstacle). Use NEGATIVE weight to avoid.
+#   - velocity: Higher = closer to target speed. Use POSITIVE weight for faster motion.
+#   - collision: Higher = safer (farther from obstacle). Use POSITIVE weight.
+#   - joints: Higher = safer (farther from joint limits). Use POSITIVE weight.
+#   - block_to_zone: Higher = block closer to target zone. Use POSITIVE weight.
+#   - zone_c_prox: Higher = closer to obstacle zone C. Use NEGATIVE weight to avoid.
+#   - height_maintain: Higher = closer to target transport height. Use POSITIVE weight.
+
+FEATURE_NAMES = [
+    "green_dist", "velocity", "collision", "joints", 
+    "block_to_zone", "zone_c_prox", "height_maintain"
+]
+
+# Default base weights for robot (before learning)
+DEFAULT_BASE_WEIGHTS = np.array([
+    -3.0,   # green_dist: avoid green block
+    2.0,    # velocity: move at good speed
+    1.0,    # collision: stay safe (but constant at large distances)
+    1.0,    # joints: stay away from joint limits
+    20.0,    # block_to_zone: move block toward target (main objective)
+    -1.0,   # zone_c_prox: avoid obstacle zone C
+    1.0,    # height_maintain: maintain transport height
+], dtype=np.float32)
+
+# Default expert weights (what the human demonstrator prefers)
+DEFAULT_EXPERT_WEIGHTS = np.array([
+    -1.0,   # green_dist: avoid green block
+    5.0,    # velocity: expert moves faster
+    1.0,    # collision: stay safe
+    1.0,    # joints: stay safe
+    20.0,   # block_to_zone: strongly prioritize moving to target
+    -2.0,   # zone_c_prox: strongly avoid obstacle zone C
+    3.0,    # height_maintain: maintain transport height
+], dtype=np.float32)
+
+# Transport height for the height maintenance feature (meters)
+DEFAULT_TRANSPORT_HEIGHT = 0.95
+
+
 def distance_to_red_block(ee_pos, red_block_pos):
     """
     Compute proximity feature to red block (target object).
@@ -195,11 +241,37 @@ def proximity_to_obstacle_zone(ee_pos, zone_c_pos):
         return tf.exp(-3.0 * distance)
 
 
+def maintain_transport_height(ee_pos, target_height=None):
+    """
+    Compute height maintenance feature for transport phase.
+    
+    Returns exponential value - higher when closer to target transport height.
+    This helps the robot maintain a consistent height during transport,
+    preventing drift in the Z direction.
+    
+    Args:
+        ee_pos: End-effector position (3D vector)
+        target_height: Target height in meters (defaults to DEFAULT_TRANSPORT_HEIGHT)
+        
+    Returns:
+        Feature value in [0, 1] range (higher = closer to target height)
+    """
+    if target_height is None:
+        target_height = DEFAULT_TRANSPORT_HEIGHT
+    
+    if isinstance(ee_pos, np.ndarray):
+        height_error = np.abs(ee_pos[2] - target_height)
+        return float(np.exp(-5.0 * height_error))
+    else:
+        height_error = tf.abs(ee_pos[2] - target_height)
+        return tf.exp(-5.0 * height_error)
+
+
 # =============================================================================
 # CENTRALIZED FEATURE SYSTEM
 # =============================================================================
 
-def compute_features(obs, include_red_dist=False, include_zones=False):
+def compute_features(obs, include_red_dist=False, include_zones=False, transport_height=None):
     """
     Compute all features from observation (SINGLE SOURCE OF TRUTH).
     
@@ -208,8 +280,8 @@ def compute_features(obs, include_red_dist=False, include_zones=False):
     Feature Sets:
     - Legacy (5 features): include_red_dist=True, include_zones=False
       [red_dist, green_dist, velocity, collision, joints]
-    - Pick-and-Place (6 features): include_red_dist=False, include_zones=True
-      [green_dist, velocity, collision, joints, block_to_zone, zone_c_prox]
+    - Pick-and-Place (7 features): include_red_dist=False, include_zones=True
+      [green_dist, velocity, collision, joints, block_to_zone, zone_c_prox, height_maintain]
     
     Args:
         obs: Observation dictionary containing:
@@ -223,6 +295,7 @@ def compute_features(obs, include_red_dist=False, include_zones=False):
             - zone_c_pos: Obstacle zone C position (optional, if include_zones=True)
         include_red_dist: Whether to include distance to red block (legacy feature)
         include_zones: Whether to include zone-based features (for pick-and-place)
+        transport_height: Target height for height maintenance feature (defaults to DEFAULT_TRANSPORT_HEIGHT)
         
     Returns:
         numpy array of feature values
@@ -268,6 +341,10 @@ def compute_features(obs, include_red_dist=False, include_zones=False):
         if zone_c_pos is not None:
             feat_zone_c_proximity = proximity_to_obstacle_zone(ee_pos, zone_c_pos)
             features.append(feat_zone_c_proximity)
+        
+        # Height maintenance feature for transport phase
+        feat_height = maintain_transport_height(ee_pos, transport_height)
+        features.append(feat_height)
     
     return np.array(features, dtype=np.float32)
 
@@ -303,6 +380,7 @@ def get_feature_descriptions(include_red_dist=False, include_zones=False):
     if include_zones:
         descriptions["block_to_target_zone"] = "Horizontal proximity of the red block to the target zone B (ignores height). Higher values mean the block is closer to where it needs to be placed in the X-Y plane. This is the key feature for successful task completion during the transport phase."
         descriptions["zone_c_proximity"] = "Proximity of end effector to obstacle zone C. Higher values mean getting closer to zone C. This should have a NEGATIVE weight to encourage avoiding zone C during transport."
+        descriptions["height_maintain"] = "Height maintenance during transport. Higher values mean the end effector is closer to the target transport height. This prevents vertical drift during horizontal transport and ensures stable block carrying."
     
     return descriptions
 
