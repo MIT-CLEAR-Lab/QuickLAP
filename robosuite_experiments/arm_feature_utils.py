@@ -30,17 +30,26 @@ FEATURE_NAMES = [
 ]
 
 # Default base weights for robot (before learning)
+# DEFAULT_BASE_WEIGHTS = np.array([
+#     -3.0,   # green_dist: avoid green block
+#     2.0,    # velocity: move at good speed
+#     1.0,    # collision: stay safe (but constant at large distances)
+#     1.0,    # joints: stay away from joint limits
+#     20.0,    # block_to_zone: move block toward target (main objective)
+#     -1.0,   # zone_c_prox: avoid obstacle zone C
+#     1.0,    # height_maintain: maintain transport height
+# ], dtype=np.float32)
 DEFAULT_BASE_WEIGHTS = np.array([
-    -3.0,   # green_dist: avoid green block
+    -5.0,   # green_dist: avoid green block
     2.0,    # velocity: move at good speed
     1.0,    # collision: stay safe (but constant at large distances)
     1.0,    # joints: stay away from joint limits
     20.0,    # block_to_zone: move block toward target (main objective)
-    -1.0,   # zone_c_prox: avoid obstacle zone C
-    1.0,    # height_maintain: maintain transport height
+    1.0,   # zone_c_prox: avoid obstacle zone C
+    0.0,    # height_maintain: maintain transport height
 ], dtype=np.float32)
 
-# Default expert weights (what the human demonstrator prefers)
+# Default expert weights (what the human demonstrator physical input represents)
 DEFAULT_EXPERT_WEIGHTS = np.array([
     -1.0,   # green_dist: avoid green block
     5.0,    # velocity: expert moves faster
@@ -84,6 +93,10 @@ def distance_to_green_block(ee_pos, green_block_pos):
     Returns exponential proximity value - higher when closer to green block.
     Value approaches 1 when very close, approaches 0 when far away.
     
+    NOTE: Uses HORIZONTAL (X-Y) distance only, ignoring Z (height).
+    This is more relevant during transport when the robot is at a different
+    height than the obstacle.
+    
     Args:
         ee_pos: End-effector position (3D vector)
         green_block_pos: Green block position (3D vector)
@@ -92,11 +105,13 @@ def distance_to_green_block(ee_pos, green_block_pos):
         Feature value in [0, 1] range
     """
     if isinstance(ee_pos, np.ndarray):
-        distance = np.linalg.norm(ee_pos - green_block_pos)
-        return float(np.exp(-3.0 * distance))
+        # Use only X-Y distance (ignore Z/height)
+        horizontal_distance = np.linalg.norm(ee_pos[:2] - green_block_pos[:2])
+        return float(np.exp(-3.0 * horizontal_distance))
     else:
-        distance = tf.norm(ee_pos - green_block_pos)
-        return tf.exp(-3.0 * distance)
+        # TensorFlow version - use only X-Y distance
+        horizontal_distance = tf.norm(ee_pos[:2] - green_block_pos[:2])
+        return tf.exp(-3.0 * horizontal_distance)
 
 
 def end_effector_velocity(ee_vel, target_speed=0.3):
@@ -370,7 +385,7 @@ def get_feature_descriptions(include_red_dist=False, include_zones=False):
     
     # Core features
     descriptions.update({
-        "distance_to_green_block": "Distance from end effector to the green block (obstacle on path). Higher values mean the robot is moving closer to the green block, which may indicate avoidance behavior or confusion.",
+        "distance_to_green_block": "Horizontal (X-Y) distance from end effector to the green block (obstacle on path), ignoring height. Higher values mean the robot is moving closer to the green block horizontally.",
         "velocity": "Speed of end effector movement. Higher values mean faster motion. Increasing this weight makes the robot move more quickly to complete the task.",
         "collision_safety": "Safety penalty for getting too close to obstacles (green block). Higher values mean more conservative collision avoidance.",
         "joint_safety": "Safety penalty for joint configurations near limits. Higher values mean more conservative joint movements.",
