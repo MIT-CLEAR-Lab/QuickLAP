@@ -32,6 +32,8 @@ from robosuite.controllers.composite.composite_controller import WholeBody
 from robosuite.wrappers import VisualizationWrapper
 from robosuite.devices import Keyboard
 
+from franka_spacemouse import SpaceMouseInput
+
 # -----------------------
 # Controller configuration
 # -----------------------
@@ -68,8 +70,10 @@ device = Keyboard(
 )
 env.viewer.add_keypress_callback(device.on_press)
 
-
-
+# -----------------------
+# Spacemouse device
+# -----------------------
+mouse = SpaceMouseInput()
 
 
 
@@ -105,7 +109,13 @@ if __name__ == '__main__':
     while True:
         start = time.time()
 
-        action_dict = device.input2action()
+        # action_dict = device.input2action()
+        # print(action_dict)
+
+        actions = mouse.get_input()
+        action_dict = {
+            'right_delta': np.array([actions[0], -actions[1], actions[5], 0 ,0 ,0])
+        }
 
         # Reset requested
         if action_dict is None:
@@ -123,9 +133,9 @@ if __name__ == '__main__':
         state = robot._joint_positions
         # print(state)
         
-        sock.send(state.tobytes())             # blocking send
-        print(f'sent: {state}')
-        reply = sock.recv()                # blocking receive
+        # sock.send(state.tobytes())             # blocking send
+        # print(f'sent: {state}')
+        # reply = sock.recv()                # blocking receive
 
         # ~20 Hz
         dt = time.time() - start

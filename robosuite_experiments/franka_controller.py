@@ -129,7 +129,7 @@ def get_franka_impedance_controller(robot):
     return policy
 
 
-def recieve_joint_state_command(robot):
+def receive_joint_state_command(robot):
     '''
     Blocks to receive the state from robosuite.
     '''
@@ -180,7 +180,7 @@ if __name__ == '__main__':
     while True:
         
         # get the desired position from robosuite and play it
-        q_desired = recieve_joint_state_command(robot)
+        q_desired = receive_joint_state_command(robot)
         update_impedance_goal(robot, q_desired)
         
         # --- rate control (20 Hz) ---

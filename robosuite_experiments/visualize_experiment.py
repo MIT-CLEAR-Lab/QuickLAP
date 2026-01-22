@@ -112,7 +112,7 @@ def main():
     print()
 
     utterance = "Go faster"
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = 'no'#os.getenv("OPENAI_API_KEY")
 
     # Create hierarchical MPC arm first without learner
     # When using physical input, human IS the expert (no simulated expert weights)
