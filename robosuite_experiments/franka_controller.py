@@ -137,7 +137,7 @@ def get_franka_impedance_controller(robot):
     return policy
 
 
-def recieve_joint_state_command(robot):
+def receive_joint_state_command(robot):
     '''
     Blocks to receive the state from robosuite.
     '''
