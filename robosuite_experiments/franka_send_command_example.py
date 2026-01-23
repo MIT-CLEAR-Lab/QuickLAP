@@ -89,9 +89,9 @@ if __name__ == '__main__':
 
     ctx = zmq.Context()
     sock = ctx.socket(zmq.REQ)
-    sock.connect("tcp://127.0.0.1:5555")
-
-    
+    # sock.connect("tcp://127.0.0.1:5555")
+    SERVER_IP = '128.30.29.23'
+    sock.connect(f"tcp://{SERVER_IP}:5555")
 
     obs = env.reset()
     # Initialize robot arm pose in simulation before starting teleop.
@@ -108,9 +108,12 @@ if __name__ == '__main__':
 
     while True:
         start = time.time()
+        state = robot._joint_positions
 
-        # action_dict = device.input2action()
-        # print(action_dict)
+        action_dict = device.input2action()
+        
+        print(action_dict)
+
 
         actions = mouse.get_input()
         action_dict = {
@@ -133,9 +136,9 @@ if __name__ == '__main__':
         state = robot._joint_positions
         # print(state)
         
-        # sock.send(state.tobytes())             # blocking send
-        # print(f'sent: {state}')
-        # reply = sock.recv()                # blocking receive
+        sock.send(state.tobytes())             # blocking send
+        print(f'sent: {state}')
+        reply = sock.recv()                # blocking receive
 
         # ~20 Hz
         dt = time.time() - start

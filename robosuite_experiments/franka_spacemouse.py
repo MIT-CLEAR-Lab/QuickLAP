@@ -2,13 +2,23 @@ import select
 import time
 from evdev import InputDevice, categorize, ecodes
 
+
+
+'''
+
+FIRST RUN:
+ 
+ls -l /dev/input/by-id/*SpaceMouse*
+
+to get the correct event id!
+'''
 buttons = {256:0, 257:0}
 
 
 class SpaceMouseInput():
 
     def __init__(self):
-        self.device =InputDevice("/dev/input/event23")
+        self.device =InputDevice("/dev/input/event3")
         self.scale_trans = 0.003
         self.scale_rot = 0.003
         self.axes = {ecodes.ABS_X:0, ecodes.ABS_Y:0, ecodes.ABS_Z:0,
@@ -41,7 +51,6 @@ if __name__ == '__main__':
         mouse = SpaceMouseInput()
 
         while True:
-            
 
             # Map axes to velocity command
             command = mouse.get_input()
