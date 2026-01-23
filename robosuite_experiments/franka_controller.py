@@ -111,7 +111,15 @@ def update_impedance_goal(
     payload = {"joint_pos_desired": q}
     if joint_vel_desired is not None:
         payload["joint_vel_desired"] = to_tensor(joint_vel_desired)
-    robot.update_current_policy(payload)
+
+    try:
+        robot.update_current_policy(payload)
+        
+    except:
+        # Restart the controller with the same policy
+        policy = get_franka_impedance_controller(robot)
+        robot.send_torch_policy(policy, blocking=False)
+
         
 
 def get_franka_impedance_controller(robot):
@@ -123,7 +131,7 @@ def get_franka_impedance_controller(robot):
     policy = JointImpedanceControl(
         joint_pos_current=robot.get_joint_positions(),
         Kp= 3.0 * torch.Tensor(robot.metadata.default_Kq),
-        Kd=torch.Tensor(robot.metadata.default_Kqd),
+        Kd= 0.1* torch.Tensor(robot.metadata.default_Kqd),
         robot_model=robot_model
     )
     return policy
@@ -134,11 +142,11 @@ def recieve_joint_state_command(robot):
     Blocks to receive the state from robosuite.
     '''
     msg = sock.recv()              # blocking
-    state = np.frombuffer(msg, dtype=np.float64)
-
+    state = np.frombuffer(msg, dtype=np.float64) # state is 14-dim array ([q_des, q_dot_des]) 
+    
     try:
         q_cur = np.asarray(robot.get_joint_positions(), dtype=np.float64)
-        q_cmd = np.asarray(state, dtype=np.float64)
+        q_cmd = np.asarray(state[:7], dtype=np.float64)
         max_abs_err = float(np.max(np.abs(q_cmd - q_cur)))
 
         # Threshold (radians): above this, do a blocking move-to.
@@ -155,7 +163,7 @@ def recieve_joint_state_command(robot):
         # Reply after (potentially) moving so the sender can treat this as an ack.
         sock.send(state.tobytes()) 
 
-    return state
+    return state[:7], state[7:14], state[14]
 
 if __name__ == '__main__':
     # Initialize robot interface and listen for commands
@@ -166,7 +174,7 @@ if __name__ == '__main__':
 
     ctx = zmq.Context()
     sock = ctx.socket(zmq.REP)
-    sock.bind("tcp://127.0.0.1:5555")
+    sock.bind("tcp://0.0.0.0:5555")
 
     # Get the robot model for torch control and start impedance controller
     policy = get_franka_impedance_controller(robot)
@@ -180,8 +188,8 @@ if __name__ == '__main__':
     while True:
         
         # get the desired position from robosuite and play it
-        q_desired = recieve_joint_state_command(robot)
-        update_impedance_goal(robot, q_desired)
+        desired_position,  desired_velocity, gripper = recieve_joint_state_command(robot)
+        update_impedance_goal(robot, joint_pos_desired=desired_position, joint_vel_desired=desired_velocity)
         
         # --- rate control (20 Hz) ---
         next_t += dt

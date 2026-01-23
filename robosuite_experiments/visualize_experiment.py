@@ -46,6 +46,12 @@ from arm_feature_utils import (
 from robosuite.devices import Keyboard
 
 
+import zmq
+ctx = zmq.Context()
+sock = ctx.socket(zmq.REQ)
+sock.connect("tcp://127.0.0.1:5555")
+
+
 def main():
     """Run experiment with hierarchical MPC and visualization."""
     # Parse arguments
@@ -112,7 +118,7 @@ def main():
     print()
 
     utterance = "Go faster"
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = "xyz" #os.getenv("OPENAI_API_KEY")
 
     # Create hierarchical MPC arm first without learner
     # When using physical input, human IS the expert (no simulated expert weights)
@@ -161,6 +167,7 @@ def main():
         print()
     
     try:
+        robot = world.env.robots[0]
         print("Running simulation with visualization...")
         if not use_physical_input:
             print("Watch for 'TRANSPORT PHASE' message - that's when MPC optimizes block movement!")
@@ -174,6 +181,10 @@ def main():
             # Get robot's planned action (before human input)
             robot_action = arm.get_action(obs)
             action = robot_action.copy()
+
+            state = np.hstack([robot._joint_positions, robot._joint_velocities, [0]]) #TODO: Add gripper state somehow..            
+            sock.send(state.tobytes())             # blocking send
+            reply = sock.recv() 
             
             # Track if human provided input this frame
             human_input_this_frame = False

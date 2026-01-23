@@ -120,11 +120,11 @@ if __name__ == '__main__':
         env.step(action)
         env.render()
 
-        state = robot._joint_positions
+        state = np.hstack([robot._joint_positions, robot._joint_velocities, [0]]) #TODO: Add gripper state somehow..
         # print(state)
         
         sock.send(state.tobytes())             # blocking send
-        print(f'sent: {state}')
+        # print(f'sent: {state}')
         reply = sock.recv()                # blocking receive
 
         # ~20 Hz
