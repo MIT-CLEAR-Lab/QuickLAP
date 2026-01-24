@@ -1,27 +1,3 @@
-# import zmq
-# import numpy as np
-# import time
-
-# ctx = zmq.Context()
-# sock = ctx.socket(zmq.REQ)
-# sock.connect("tcp://127.0.0.1:5555")
-
-# x = np.array([1.0, 2.0, 3.0], dtype=np.float64)
-
-
-
-
-
-# if __name__ == '__main__':
-
-#     for _ in np.arange(1000):
-
-#         sock.send(x.tobytes())             # blocking send
-#         reply = sock.recv()                # blocking receive
-
-#         y = np.frombuffer(reply, dtype=np.float64)
-#         print(y)
-
 import time
 import numpy as np
 import zmq
@@ -90,6 +66,7 @@ if __name__ == '__main__':
     ctx = zmq.Context()
     sock = ctx.socket(zmq.REQ)
     # sock.connect("tcp://127.0.0.1:5555")
+
     SERVER_IP = '128.30.29.23'
     sock.connect(f"tcp://{SERVER_IP}:5555")
 
@@ -115,29 +92,18 @@ if __name__ == '__main__':
         print(action_dict)
 
 
-        actions = mouse.get_input()
-        action_dict = {
-            'right_delta': np.array([actions[0], -actions[1], actions[5], 0 ,0 ,0])
-        }
+        actions = mouse.get_input() # spacemouse x, y, z, roll, pitch yaw, button 
+        robot_action = np.array([actions[0], -actions[1], actions[5], 0 ,0 ,0, actions[6]]) # robot's x,y,z,roll,pitch,yaw,gripper
 
-        # Reset requested
-        if action_dict is None:
-            break
 
-        # Use delta action directly
-        action = robot.create_action_vector({
-            arm: action_dict[f"{arm}_delta"]
-            for arm in robot.arms
-        })
-
-        env.step(action)
+        env.step(robot_action)
         env.render()
 
-        state = robot._joint_positions
+        state = np.hstack([robot._joint_positions, robot._joint_velocities, [robot_action[6]]]) # robot's joint state, joint vel, gripper state
         # print(state)
         
         sock.send(state.tobytes())             # blocking send
-        print(f'sent: {state}')
+        # print(f'sent: {state}')
         reply = sock.recv()                # blocking receive
 
         # ~20 Hz

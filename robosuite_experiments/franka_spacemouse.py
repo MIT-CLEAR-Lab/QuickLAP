@@ -12,8 +12,6 @@ ls -l /dev/input/by-id/*SpaceMouse*
 
 to get the correct event id!
 '''
-buttons = {256:0, 257:0}
-
 
 class SpaceMouseInput():
 
@@ -23,7 +21,9 @@ class SpaceMouseInput():
         self.scale_rot = 0.003
         self.axes = {ecodes.ABS_X:0, ecodes.ABS_Y:0, ecodes.ABS_Z:0,
             ecodes.ABS_RX:0, ecodes.ABS_RY:0, ecodes.ABS_RZ:0}
-    
+        self.buttons = {256:0, 257:0}
+        self._prev_buttons = {256: 0, 257: 0}
+
     def get_input(self):
         '''
         Returns the space mouse reading as a 6-dimensional array.
@@ -33,6 +33,11 @@ class SpaceMouseInput():
             for event in self.device.read():
                 if event.type == ecodes.EV_ABS:
                     self.axes[event.code] = event.value
+                elif event.type == ecodes.EV_KEY:
+                    # XOR toggle on rising edge
+                    if event.value == 1 and self._prev_buttons[event.code] == 0:
+                        self.buttons[event.code] ^= 1
+                    self._prev_buttons[event.code] = event.value
         
         command = [
             self.axes[ecodes.ABS_X] * self.scale_trans,
@@ -41,6 +46,7 @@ class SpaceMouseInput():
             self.axes[ecodes.ABS_RX] * self.scale_rot,
             self.axes[ecodes.ABS_RY] * self.scale_rot,
             self.axes[ecodes.ABS_RZ] * self.scale_rot,
+            2*self.buttons[256] - 1 # -1 is open, 1 is closed
         ]
         
         return command
@@ -54,7 +60,7 @@ if __name__ == '__main__':
 
             # Map axes to velocity command
             command = mouse.get_input()
-            print(f'{command[0]:.2f}, {command[1]:.2f}, {command[5]:.2f}')
+            print(f'{command[0]:.2f}, {command[1]:.2f}, {command[5]:.2f}, {command[-1]}')
             
             # Small sleep to avoid busy loop
             time.sleep(0.005)
