@@ -4,11 +4,11 @@ Intervention arm that simulates human interventions during task execution.
 
 import copy
 import numpy as np
-from base_rational_arm import BaseRationalArm
+from hierarchical_mpc_arm import HierarchicalMPCArm
 from arm_world import ArmWorld
+from robosuite_experiments.arm_feature_utils import DEFAULT_BASE_WEIGHTS
 
-
-class InterventionArm(BaseRationalArm):
+class InterventionArm(HierarchicalMPCArm):
     """
     Robotic arm agent with simulated expert interventions.
     
@@ -26,6 +26,8 @@ class InterventionArm(BaseRationalArm):
         intervention_interval=(50, 70),
         base_weights=None,
         seed=None,
+        planner_horizon=8,
+        planner_n_iter=15, 
     ):
         """
         Initialize the intervention arm.
@@ -42,9 +44,20 @@ class InterventionArm(BaseRationalArm):
         """
         # Initialize with base (wrong) weights
         if base_weights is None:
-            base_weights = np.array([1.0, 1.0, 1.0, 2.0, 2.0])
+            base_weights = DEFAULT_BASE_WEIGHTS.copy()
         
-        super().__init__(world, weights=base_weights, seed=seed)
+        super().__init__(
+            world=world,
+            learner=learner,
+            utterance=utterance,
+            expert_weights=expert_weights,
+            intervention_interval=intervention_interval,
+            base_weights=base_weights,
+            seed=seed,
+            planner_horizon=planner_horizon,
+            planner_n_iter=planner_n_iter,
+        )
+        
         
         self.learner = learner
         self.utterance = utterance
@@ -143,10 +156,9 @@ class InterventionArm(BaseRationalArm):
         })
         
         # Update simulated robot state for next timestep
-        # Simple dynamics: ee_pos += action[:3] * dt
-        dt = 0.05  # 20Hz control
+        # OSC_POSE actions are delta positions (not velocities), so integrate directly
         self.physical_robot_sim_state["ee_vel"] = robot_action[:3].copy()
-        self.physical_robot_sim_state["ee_pos"] = self.physical_robot_sim_state["ee_pos"] + robot_action[:3] * dt
+        self.physical_robot_sim_state["ee_pos"] = self.physical_robot_sim_state["ee_pos"] + robot_action[:3]
         
         # Block follows EE during transport (assuming grasped)
         if self.task_phase in ["transport", "move"]:
@@ -480,26 +492,43 @@ class InterventionArm(BaseRationalArm):
                 self.recording = True
                 self.robot_trajectory = []
                 self.human_trajectory = []
+                # Initialize counterfactual robot state for simulated intervention
+                self.robot_sim_state = {
+                    "ee_pos": obs["ee_pos"].copy(),
+                    "ee_vel": obs["ee_vel"].copy(),
+                    "red_block_pos": obs["red_block_pos"].copy(),
+                }
                 print(f"[Timestep {self.timestep}] Started intervention: '{self.utterance}'")
             
             # Get both actions
             robot_action = self.get_robot_action(obs)
             expert_action = self.get_expert_action(obs)
             
+            # Create counterfactual robot observation (what robot would see without expert)
+            robot_obs = copy.deepcopy(obs)
+            robot_obs["ee_pos"] = self.robot_sim_state["ee_pos"].copy()
+            robot_obs["ee_vel"] = self.robot_sim_state["ee_vel"].copy()
+            robot_obs["red_block_pos"] = self.robot_sim_state["red_block_pos"].copy()
+            
             # Record trajectories
-            # Store the full observation dict for feature computation
-            # Need deep copy since obs contains nested structures
+            # Robot trajectory: counterfactual state (simulated without expert input)
             self.robot_trajectory.append({
-                "obs": copy.deepcopy(obs),  # Deep copy observation dict
+                "obs": robot_obs,
                 "control": robot_action.copy()
             })
             
+            # Human trajectory: actual state (with expert input applied)
             self.human_trajectory.append({
-                "obs": copy.deepcopy(obs),  # Deep copy observation dict
+                "obs": copy.deepcopy(obs),
                 "control": expert_action.copy()
             })
             
-            # Execute expert action
+            # Update counterfactual robot state for next timestep
+            # OSC_POSE actions are delta positions (not velocities), so integrate directly
+            self.robot_sim_state["ee_vel"] = robot_action[:3].copy()
+            self.robot_sim_state["ee_pos"] = self.robot_sim_state["ee_pos"] + robot_action[:3]
+            
+            # Execute expert action (this affects actual state)
             return expert_action
         
         else:

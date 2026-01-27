@@ -3,6 +3,8 @@ Robosuite-compatible learners that work with observation dictionaries.
 
 These extend the interact_drive learners but override compute_features
 to handle robosuite's dict-based observations instead of TensorFlow tensors.
+
+Uses arm manipulation prompts instead of vehicle prompts.
 """
 
 import numpy as np
@@ -15,13 +17,52 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from interact_drive.learner.masked_learner import MaskedLLMPHRILearner
 from interact_drive.learner.adapt_gated_llm_learner import AdaptGatedLLMPHRILearner
 
+# Import robosuite-specific selectors with arm manipulation prompts
+from robosuite_experiments.robosuite_selectors import (
+    RobosuiteMaskedLLMFeatureSelector,
+    RobosuiteMaskedLLMFeatureSelectorDPhi,
+    RobosuiteAdaptGatedLLMFeatureSelector,
+    log_weight_update,
+)
+
+# Robosuite selector mapping
+ROBOSUITE_SELECTORS = {
+    "default": RobosuiteMaskedLLMFeatureSelector,
+    "d_phi": RobosuiteMaskedLLMFeatureSelectorDPhi,
+}
+
 
 class RobosuiteMaskedLLMPHRILearner(MaskedLLMPHRILearner):
     """
     Robosuite-compatible MaskedLLMPHRILearner.
     
     Overrides compute_features to handle dict observations and returns numpy arrays.
+    Uses arm manipulation prompts instead of vehicle prompts.
     """
+    
+    def __init__(
+        self,
+        car,  # Actually an arm, but keeping 'car' for compatibility with parent class
+        explanation: str,
+        feature_descriptions: dict[str, str],
+        learning_rate: float = 1.0,
+        log_file: str = "learning_log_masked.txt",
+        openai_api_key: str | None = None,
+        selector: str = "d_phi",  # Default to d_phi for robosuite
+        log_llm: bool = False,
+    ):
+        # Call grandparent __init__ (PHRILearner) to avoid vehicle selector initialization
+        from interact_drive.learner.phri_learner import PHRILearner
+        PHRILearner.__init__(self, car, learning_rate, log_file)
+        
+        self.explanation = explanation
+        self.features_names = list(feature_descriptions.keys())
+        self.feature_discriptions = feature_descriptions
+        
+        # Use robosuite selectors with arm manipulation prompts
+        self.feature_selector = ROBOSUITE_SELECTORS[selector](
+            feature_descriptions, openai_api_key, log_llm=log_llm
+        )
     
     def compute_features(self, trajectory: dict[str, list]) -> np.ndarray:
         """
@@ -95,6 +136,15 @@ class RobosuiteMaskedLLMPHRILearner(MaskedLLMPHRILearner):
             explanation=explanation,
             feature_mask=feature_mask,
         )
+        
+        # Log weight update to LLM log file
+        log_weight_update(
+            self.car.weights,
+            new_weights,
+            self.features_names,
+            self.feature_selector.METHOD_ID,
+        )
+        
         self.car.weights = new_weights
 
         print("\nFeature Analysis:")
@@ -111,7 +161,39 @@ class RobosuiteAdaptGatedLLMPHRILearner(AdaptGatedLLMPHRILearner):
     Robosuite-compatible AdaptGatedLLMPHRILearner.
     
     Overrides compute_features to handle dict observations and returns numpy arrays.
+    Uses arm manipulation prompts instead of vehicle prompts.
     """
+    
+    def __init__(
+        self,
+        car,  # Actually an arm, but keeping 'car' for compatibility with parent class
+        explanation: str,
+        feature_descriptions: dict[str, str],
+        learning_rate: float = 1.0,
+        log_file: str = "learning_log_llm.txt",
+        openai_api_key: str | None = None,
+        use_speech_input: bool = False,
+        audio_file_path: str | None = None,
+        method: int = 1,  # 0 for phri, 1 for quicklap, 2/3 for language
+        log_llm: bool = False,
+    ):
+        # Call grandparent __init__ (PHRILearner) to avoid vehicle selector initialization
+        from interact_drive.learner.phri_learner import PHRILearner
+        PHRILearner.__init__(self, car, learning_rate, log_file)
+        
+        self.explanation = explanation
+        self.features_names = list(feature_descriptions.keys())
+        self.feature_descriptions = feature_descriptions
+        
+        # Use robosuite selector with arm manipulation prompts
+        self.feature_selector = RobosuiteAdaptGatedLLMFeatureSelector(
+            feature_descriptions, openai_api_key, method=method, log_llm=log_llm,
+        )
+        
+        self.use_speech_input = use_speech_input
+        self.audio_file_path = audio_file_path
+        self.openai_api_key = openai_api_key
+        self.method = method
     
     def compute_features(self, trajectory: dict[str, list]) -> np.ndarray:
         """
@@ -159,8 +241,9 @@ class RobosuiteAdaptGatedLLMPHRILearner(AdaptGatedLLMPHRILearner):
 
         # Create feature values dictionary
         robot_feature_values = {
-            name: robot_features[i] if self.method != 3 else np.nan 
-            for i, name in enumerate(self.features_names)
+            # name: robot_features[i] if self.method != 3 else np.nan 
+            # for i, name in enumerate(self.features_names)
+            name: robot_features[i] for i, name in enumerate(self.features_names)
         }
         human_feature_values = {
             name: human_features[i] if self.method != 3 else np.nan 
@@ -253,6 +336,15 @@ class RobosuiteAdaptGatedLLMPHRILearner(AdaptGatedLLMPHRILearner):
             w_phi=w_phi,
             w_mu=w_mu,
         )
+        
+        # Log weight update to LLM log file
+        log_weight_update(
+            self.car.weights,
+            new_weights,
+            self.features_names,
+            self.method,
+        )
+        
         self.car.weights = new_weights
 
         print("\nFeature Analysis:")

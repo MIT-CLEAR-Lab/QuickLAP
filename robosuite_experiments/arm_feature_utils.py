@@ -13,55 +13,61 @@ import tensorflow as tf
 # CENTRALIZED WEIGHT CONSTANTS (SINGLE SOURCE OF TRUTH)
 # =============================================================================
 # Feature order for pick-and-place (7 features):
-# [green_dist, velocity, collision, joints, block_to_zone, zone_c_prox, height_maintain]
+# [green_clearance, velocity, collision, joints, block_to_zone, zone_c_clearance, height_maintain]
 #
-# Feature semantics:
-#   - green_dist: Higher = closer to green block (obstacle). Use NEGATIVE weight to avoid.
+# Feature semantics (all use POSITIVE weights for desired behavior):
+#   - green_clearance: Higher = FARTHER from green block. Use POSITIVE weight to avoid.
 #   - velocity: Higher = closer to target speed. Use POSITIVE weight for faster motion.
 #   - collision: Higher = safer (farther from obstacle). Use POSITIVE weight.
 #   - joints: Higher = safer (farther from joint limits). Use POSITIVE weight.
 #   - block_to_zone: Higher = block closer to target zone. Use POSITIVE weight.
-#   - zone_c_prox: Higher = closer to obstacle zone C. Use NEGATIVE weight to avoid.
+#   - zone_c_clearance: Higher = FARTHER from obstacle zone C. Use POSITIVE weight to avoid.
 #   - height_maintain: Higher = closer to target transport height. Use POSITIVE weight.
 
 FEATURE_NAMES = [
-    "green_dist", "velocity", "collision", "joints", 
-    "block_to_zone", "zone_c_prox", "height_maintain"
+    "green_clearance", "velocity", "collision", "joints", 
+    "block_to_zone", "zone_c_clearance", "height_maintain"
 ]
 
 # Default base weights for robot (before learning)
-# DEFAULT_BASE_WEIGHTS = np.array([
-#     -3.0,   # green_dist: avoid green block
-#     2.0,    # velocity: move at good speed
-#     1.0,    # collision: stay safe (but constant at large distances)
-#     1.0,    # joints: stay away from joint limits
-#     20.0,    # block_to_zone: move block toward target (main objective)
-#     -1.0,   # zone_c_prox: avoid obstacle zone C
-#     1.0,    # height_maintain: maintain transport height
-# ], dtype=np.float32)
 DEFAULT_BASE_WEIGHTS = np.array([
-    -5.0,   # green_dist: avoid green block
-    2.0,    # velocity: move at good speed
+    1.0,    # green_clearance: avoid green block (positive = stay far)
+    1.0,    # velocity: move at good speed
     1.0,    # collision: stay safe (but constant at large distances)
     1.0,    # joints: stay away from joint limits
-    20.0,    # block_to_zone: move block toward target (main objective)
-    1.0,   # zone_c_prox: avoid obstacle zone C
-    0.0,    # height_maintain: maintain transport height
+    20.0,   # block_to_zone: move block toward target (main objective)
+    0.0,    # zone_c_clearance: avoid obstacle zone C
+    1.0,    # height_maintain: maintain transport height
 ], dtype=np.float32)
 
 # Default expert weights (what the human demonstrator physical input represents)
 DEFAULT_EXPERT_WEIGHTS = np.array([
-    -1.0,   # green_dist: avoid green block
-    5.0,    # velocity: expert moves faster
+    15.0,   # green_clearance: strongly avoid green block (positive = stay far)
+    1.0,    # velocity: expert moves faster
     1.0,    # collision: stay safe
     1.0,    # joints: stay safe
     20.0,   # block_to_zone: strongly prioritize moving to target
-    -2.0,   # zone_c_prox: strongly avoid obstacle zone C
-    3.0,    # height_maintain: maintain transport height
+    -10.0,   # zone_c_clearance: strongly avoid obstacle zone C (positive = stay far)
+    1.0,    # height_maintain: maintain transport height
 ], dtype=np.float32)
 
 # Transport height for the height maintenance feature (meters)
-DEFAULT_TRANSPORT_HEIGHT = 0.95
+DEFAULT_TRANSPORT_HEIGHT = 1.05
+
+# =============================================================================
+# SPATIAL LAYOUT CONTEXT (for LLM prompts)
+# =============================================================================
+# This provides the LLM with spatial understanding of the environment
+# to help distinguish intentional actions from geometric side effects.
+
+SPATIAL_LAYOUT_CONTEXT = """
+Environment Spatial Layout:
+- Table surface is at z=0.90m
+- Zone A (start): x=-0.2, y=-0.3 
+- Zone B (target): x=0.2, y=0.3 
+- Zone C (obstacle zone): x=-0.15, y=0.25 
+- Green block (obstacle): x=0.05, y=-0.05 
+"""
 
 
 def distance_to_red_block(ee_pos, red_block_pos):
@@ -86,12 +92,13 @@ def distance_to_red_block(ee_pos, red_block_pos):
         return tf.exp(-3.0 * distance)
 
 
-def distance_to_green_block(ee_pos, green_block_pos):
+def clearance_from_green_block(ee_pos, green_block_pos):
     """
-    Compute proximity feature to green block (obstacle).
+    Compute clearance feature from green block (obstacle).
     
-    Returns exponential proximity value - higher when closer to green block.
-    Value approaches 1 when very close, approaches 0 when far away.
+    Returns exponential clearance value - higher when FARTHER from green block.
+    Value approaches 0 when very close, approaches 1 when far away.
+    A POSITIVE weight encourages the robot to stay far from the obstacle.
     
     NOTE: Uses HORIZONTAL (X-Y) distance only, ignoring Z (height).
     This is more relevant during transport when the robot is at a different
@@ -102,16 +109,16 @@ def distance_to_green_block(ee_pos, green_block_pos):
         green_block_pos: Green block position (3D vector)
         
     Returns:
-        Feature value in [0, 1] range
+        Feature value in [0, 1] range (higher = farther = safer)
     """
     if isinstance(ee_pos, np.ndarray):
         # Use only X-Y distance (ignore Z/height)
         horizontal_distance = np.linalg.norm(ee_pos[:2] - green_block_pos[:2])
-        return float(np.exp(-3.0 * horizontal_distance))
+        return float(1.0 - np.exp(-3.0 * horizontal_distance))
     else:
         # TensorFlow version - use only X-Y distance
         horizontal_distance = tf.norm(ee_pos[:2] - green_block_pos[:2])
-        return tf.exp(-3.0 * horizontal_distance)
+        return 1.0 - tf.exp(-3.0 * horizontal_distance)
 
 
 def end_effector_velocity(ee_vel, target_speed=0.3):
@@ -234,26 +241,26 @@ def distance_block_to_target_zone(red_block_pos, zone_b_pos):
         return tf.exp(-3.0 * horizontal_distance)
 
 
-def proximity_to_obstacle_zone(ee_pos, zone_c_pos):
+def clearance_from_obstacle_zone(ee_pos, zone_c_pos):
     """
-    Compute proximity of end-effector to obstacle zone C.
+    Compute clearance of end-effector from obstacle zone C.
     
-    Returns exponential proximity value - higher when EE is closer to zone C.
-    This feature should be given a NEGATIVE weight to encourage avoiding zone C.
+    Returns exponential clearance value - higher when EE is FARTHER from zone C.
+    A POSITIVE weight encourages the robot to stay far from zone C.
     
     Args:
         ee_pos: End-effector position (3D vector)
         zone_c_pos: Obstacle zone C position (3D vector)
         
     Returns:
-        Feature value in [0, 1] range (higher = closer = worse)
+        Feature value in [0, 1] range (higher = farther = safer)
     """
     if isinstance(ee_pos, np.ndarray):
         distance = np.linalg.norm(ee_pos - zone_c_pos)
-        return float(np.exp(-3.0 * distance))
+        return float(1.0 - np.exp(-3.0 * distance))
     else:
         distance = tf.norm(ee_pos - zone_c_pos)
-        return tf.exp(-3.0 * distance)
+        return 1.0 - tf.exp(-3.0 * distance)
 
 
 def maintain_transport_height(ee_pos, target_height=None):
@@ -294,9 +301,9 @@ def compute_features(obs, include_red_dist=False, include_zones=False, transport
     
     Feature Sets:
     - Legacy (5 features): include_red_dist=True, include_zones=False
-      [red_dist, green_dist, velocity, collision, joints]
+      [red_dist, green_clearance, velocity, collision, joints]
     - Pick-and-Place (7 features): include_red_dist=False, include_zones=True
-      [green_dist, velocity, collision, joints, block_to_zone, zone_c_prox, height_maintain]
+      [green_clearance, velocity, collision, joints, block_to_zone, zone_c_clearance, height_maintain]
     
     Args:
         obs: Observation dictionary containing:
@@ -331,13 +338,13 @@ def compute_features(obs, include_red_dist=False, include_zones=False, transport
             features.append(feat_red_dist)
     
     # Core features (always present)
-    feat_green_dist = distance_to_green_block(ee_pos, green_block_pos)
+    feat_green_clearance = clearance_from_green_block(ee_pos, green_block_pos)
     feat_velocity = end_effector_velocity(ee_vel)
     feat_collision = collision_safety(ee_pos, green_block_pos)
     feat_joints = joint_safety(joint_pos, joint_limits)
     
     features.extend([
-        feat_green_dist,
+        feat_green_clearance,
         feat_velocity,
         feat_collision,
         feat_joints,
@@ -354,8 +361,8 @@ def compute_features(obs, include_red_dist=False, include_zones=False, transport
             features.append(feat_block_to_zone)
         
         if zone_c_pos is not None:
-            feat_zone_c_proximity = proximity_to_obstacle_zone(ee_pos, zone_c_pos)
-            features.append(feat_zone_c_proximity)
+            feat_zone_c_clearance = clearance_from_obstacle_zone(ee_pos, zone_c_pos)
+            features.append(feat_zone_c_clearance)
         
         # Height maintenance feature for transport phase
         feat_height = maintain_transport_height(ee_pos, transport_height)
@@ -385,16 +392,16 @@ def get_feature_descriptions(include_red_dist=False, include_zones=False):
     
     # Core features
     descriptions.update({
-        "distance_to_green_block": "Horizontal (X-Y) distance from end effector to the green block (obstacle on path), ignoring height. Higher values mean the robot is moving closer to the green block horizontally.",
-        "velocity": "Speed of end effector movement. Higher values mean faster motion. Increasing this weight makes the robot move more quickly to complete the task.",
+        "green_clearance": "Clearance from the green block (obstacle). HIGHER values mean FARTHER from the obstacle. Increasing this weight makes the robot stay farther away; decreasing it makes the robot get closer.",
+        "velocity": "Speed of end effector movement. Higher values mean faster motion. Increasing this weight makes the robot move faster.",
         "collision_safety": "Safety penalty for getting too close to obstacles (green block). Higher values mean more conservative collision avoidance.",
         "joint_safety": "Safety penalty for joint configurations near limits. Higher values mean more conservative joint movements.",
     })
     
     # Zone-based features (pick-and-place)
     if include_zones:
-        descriptions["block_to_target_zone"] = "Horizontal proximity of the red block to the target zone B (ignores height). Higher values mean the block is closer to where it needs to be placed in the X-Y plane. This is the key feature for successful task completion during the transport phase."
-        descriptions["zone_c_proximity"] = "Proximity of end effector to obstacle zone C. Higher values mean getting closer to zone C. This should have a NEGATIVE weight to encourage avoiding zone C during transport."
+        descriptions["block_to_target_zone"] = "Horizontal proximity of the red block to the GOAL target zone B (ignores height). Higher values mean the block is closer to where it needs to be placed in the X-Y plane. This is the key feature for SUCCESSFUL task completion during the transport phase."
+        descriptions["zone_c_clearance"] = "Clearance from obstacle zone C. HIGHER values mean FARTHER from zone C. Increasing this weight makes the robot stay farther away; decreasing it makes the robot get closer."
         descriptions["height_maintain"] = "Height maintenance during transport. Higher values mean the end effector is closer to the target transport height. This prevents vertical drift during horizontal transport and ensures stable block carrying."
     
     return descriptions

@@ -175,7 +175,7 @@ class MPCArmPlanner(ArmPlanner):
         import arm_feature_utils as feature_utils
         
         # Compute features (these functions handle TensorFlow tensors)
-        feat_green_dist = feature_utils.distance_to_green_block(ee_pos, green_block_pos)
+        feat_green_clearance = feature_utils.clearance_from_green_block(ee_pos, green_block_pos)
         feat_velocity = feature_utils.end_effector_velocity(ee_vel)
         feat_collision = feature_utils.collision_safety(ee_pos, green_block_pos)
         feat_joints = feature_utils.joint_safety(joint_pos, joint_limits)
@@ -184,30 +184,30 @@ class MPCArmPlanner(ArmPlanner):
         num_weights = len(self.arm.weights)
         
         if num_weights == 7 and zone_b_pos is not None and zone_c_pos is not None:
-            # 7 features: includes block_to_zone, zone_c, and height_maintain
+            # 7 features: includes block_to_zone, zone_c_clearance, and height_maintain
             feat_block_to_zone = feature_utils.distance_block_to_target_zone(red_block_pos, zone_b_pos)
-            feat_zone_c_proximity = feature_utils.proximity_to_obstacle_zone(ee_pos, zone_c_pos)
+            feat_zone_c_clearance = feature_utils.clearance_from_obstacle_zone(ee_pos, zone_c_pos)
             feat_height = feature_utils.maintain_transport_height(ee_pos)
             features = tf.stack([
-                feat_green_dist,
+                feat_green_clearance,
                 feat_velocity,
                 feat_collision,
                 feat_joints,
                 feat_block_to_zone,
-                feat_zone_c_proximity,
+                feat_zone_c_clearance,
                 feat_height
             ])
         elif num_weights == 6 and zone_b_pos is not None and zone_c_pos is not None:
-            # 6 features: includes block_to_zone and zone_c (no height_maintain)
+            # 6 features: includes block_to_zone and zone_c_clearance (no height_maintain)
             feat_block_to_zone = feature_utils.distance_block_to_target_zone(red_block_pos, zone_b_pos)
-            feat_zone_c_proximity = feature_utils.proximity_to_obstacle_zone(ee_pos, zone_c_pos)
+            feat_zone_c_clearance = feature_utils.clearance_from_obstacle_zone(ee_pos, zone_c_pos)
             features = tf.stack([
-                feat_green_dist,
+                feat_green_clearance,
                 feat_velocity,
                 feat_collision,
                 feat_joints,
                 feat_block_to_zone,
-                feat_zone_c_proximity
+                feat_zone_c_clearance
             ])
         elif num_weights == 5 and zone_b_pos is not None:
             # 5 features: includes block_to_zone (original + block_to_zone)
@@ -215,7 +215,7 @@ class MPCArmPlanner(ArmPlanner):
             feat_block_to_zone = feature_utils.distance_block_to_target_zone(red_block_pos, zone_b_pos)
             features = tf.stack([
                 feat_red_dist,
-                feat_green_dist,
+                feat_green_clearance,
                 feat_velocity,
                 feat_collision,
                 feat_joints,
@@ -224,7 +224,7 @@ class MPCArmPlanner(ArmPlanner):
         else:
             # Original 4 features (no red_dist, no zones)
             features = tf.stack([
-                feat_green_dist,
+                feat_green_clearance,
                 feat_velocity,
                 feat_collision,
                 feat_joints

@@ -104,7 +104,7 @@ class TwoBlockPickPlace(ManipulationEnv):
             rotation=None,
             ensure_object_boundary_in_range=False,
             ensure_valid_placement=False,
-            reference_pos=self.table_offset + np.array([0.0, 0.0, 0.025]),  # Center of table
+            reference_pos=self.table_offset + np.array([0.05, -0.05, 0.025]),  
             z_offset=0.0,
         )
         self.placement_initializer.append_sampler(green_sampler)
