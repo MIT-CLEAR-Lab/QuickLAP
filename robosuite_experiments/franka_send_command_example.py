@@ -89,12 +89,14 @@ if __name__ == '__main__':
 
         action_dict = device.input2action()
         
-        print(action_dict)
+        # print(action_dict)
 
 
         actions = mouse.get_input() # spacemouse x, y, z, roll, pitch yaw, button 
         robot_action = np.array([actions[0], -actions[1], actions[5], 0 ,0 ,0, actions[6]]) # robot's x,y,z,roll,pitch,yaw,gripper
 
+        if action_dict is not None:
+            robot_action [:6] += action_dict['right_delta']
 
         env.step(robot_action)
         env.render()

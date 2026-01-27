@@ -49,7 +49,8 @@ from robosuite.devices import Keyboard
 import zmq
 ctx = zmq.Context()
 sock = ctx.socket(zmq.REQ)
-sock.connect("tcp://127.0.0.1:5555")
+IP_ADDRESS = '128.30.29.23'
+sock.connect(f"tcp://{IP_ADDRESS}:5555")
 
 
 def main():
@@ -118,7 +119,7 @@ def main():
     print()
 
     utterance = "Go faster"
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = 'none' #os.getenv("OPENAI_API_KEY")
 
     # Create hierarchical MPC arm first without learner
     # When using physical input, human IS the expert (no simulated expert weights)
@@ -180,11 +181,7 @@ def main():
         for t in range(args.horizon):
             # Get robot's planned action (before human input)
             robot_action = arm.get_action(obs)
-            action = robot_action.copy()
-
-            state = np.hstack([robot._joint_positions, robot._joint_velocities, [0]]) #TODO: Add gripper state somehow..            
-            sock.send(state.tobytes())             # blocking send
-            reply = sock.recv() 
+            action = robot_action.copy() 
             
             # Track if human provided input this frame
             human_input_this_frame = False
@@ -224,6 +221,10 @@ def main():
             
             # Step environment
             obs, _, done, _ = world.step(action)
+
+            state = np.hstack([robot._joint_positions, robot._joint_velocities, [action[-1]]]) #TODO: Add gripper state somehow..            
+            sock.send(state.tobytes())             # blocking send
+            reply = sock.recv()                    # blocking recieve
             
             # Compute reward
             reward = arm.reward_fn(obs)
