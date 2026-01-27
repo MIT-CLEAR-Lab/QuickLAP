@@ -24,6 +24,7 @@ import argparse
 import numpy as np
 from datetime import datetime
 import dotenv
+import mujoco
 dotenv.load_dotenv()
 
 # Add parent directory to path
@@ -50,6 +51,71 @@ import zmq
 ctx = zmq.Context()
 sock = ctx.socket(zmq.REQ)
 sock.connect("tcp://127.0.0.1:5555")
+
+
+
+def render_counterfactual_marker(viewer, counterfactual_pos, actual_pos):
+    """
+    Render a marker showing the counterfactual robot position.
+    
+    Uses MuJoCo's viewer to draw a red sphere where the robot "would be"
+    without the intervention, and a line connecting it to the actual position.
+    
+    Args:
+        viewer: MuJoCo viewer instance
+        counterfactual_pos: [x, y, z] position of counterfactual EE
+        actual_pos: [x, y, z] actual EE position
+    """
+    if counterfactual_pos is None or viewer is None:
+        return
+    
+    # Red sphere at counterfactual position
+    mujoco.mjv_initGeom(
+        viewer.viewer.user_scn.geoms[0],
+        mujoco.mjtGeom.mjGEOM_SPHERE,
+        np.array([0.02, 0, 0]),  # size (radius)
+        counterfactual_pos.astype(np.float64),  # position
+        np.eye(3).flatten().astype(np.float64),  # rotation matrix
+        np.array([1.0, 0.2, 0.2, 0.7]),  # RGBA (red, semi-transparent)
+    )
+    viewer.viewer.user_scn.ngeom = 1
+    
+    # Line connecting counterfactual to actual (shows divergence)
+    midpoint = (counterfactual_pos + actual_pos) / 2
+    direction = actual_pos - counterfactual_pos
+    length = np.linalg.norm(direction)
+    
+    if length > 0.001:  # Only draw if there's meaningful divergence
+        # Capsule oriented along the line
+        # MuJoCo capsule: size[0] = radius, size[1] = half-length
+        mujoco.mjv_initGeom(
+            viewer.viewer.user_scn.geoms[1],
+            mujoco.mjtGeom.mjGEOM_CAPSULE,
+            np.array([0.005, length / 2, 0]),  # size
+            midpoint.astype(np.float64),  # position (center of capsule)
+            _rotation_matrix_from_direction(direction).flatten().astype(np.float64),
+            np.array([1.0, 0.5, 0.0, 0.5]),  # RGBA (orange, semi-transparent)
+        )
+        viewer.viewer.user_scn.ngeom = 2
+
+
+def _rotation_matrix_from_direction(direction):
+    """Create rotation matrix to align Z-axis with given direction."""
+    direction = direction / (np.linalg.norm(direction) + 1e-8)
+    
+    # Find perpendicular vectors
+    if abs(direction[2]) < 0.9:
+        up = np.array([0, 0, 1])
+    else:
+        up = np.array([1, 0, 0])
+    
+    x_axis = np.cross(up, direction)
+    x_axis = x_axis / (np.linalg.norm(x_axis) + 1e-8)
+    y_axis = np.cross(direction, x_axis)
+    
+    # Rotation matrix with direction as Z-axis
+    rot = np.column_stack([x_axis, y_axis, direction])
+    return rot
 
 
 def main():
@@ -83,12 +149,14 @@ def main():
     print("\nKey Features:")
     print("  1. Phase-based task sequencing (approach → grasp → transport → release)")
     print("  2. MPC motion planning during transport phase")
-    print("  3. 7 features including 'block_to_target_zone', 'zone_c_proximity', and 'height_maintain'")
+    print("  3. 7 features including 'block_to_target_zone', 'zone_c_clearance', and 'height_maintain'")
     if use_physical_input:
         print("  4. PHYSICAL INPUT ENABLED - YOU are the expert!")
         print("     Controls: W/S (Y), A/D (X), Q/E (Z), SPACE (gripper), ESC (exit)")
     else:
         print("  4. Simulated expert intervention")
+        print("     🔴 RED SPHERE shows counterfactual (where robot WOULD be without intervention)")
+        print("     🟠 ORANGE LINE shows divergence between counterfactual and actual position")
     print("  5. Weight learning from intervention using QuickLAP")
     print()
     print("Note: On macOS, this requires mjpython!")
@@ -105,34 +173,35 @@ def main():
     )
     
     # Use centralized default weights from arm_feature_utils
-    # 7 features: [green_dist, velocity, collision, joints, block_to_zone, zone_c_prox, height_maintain]
+    # 7 features: [green_clearance, velocity, collision, joints, block_to_zone, zone_c_clearance, height_maintain]
     base_weights = DEFAULT_BASE_WEIGHTS.copy()
+    
+    # When using physical input, human IS the expert (no simulated expert weights)
+    if use_physical_input:
+        expert_weights = None  # Human is the expert
+    else:
+        expert_weights = DEFAULT_EXPERT_WEIGHTS.copy()
+
+    utterance = "WOW MOVE!"
+    api_key = os.getenv("OPENAI_API_KEY")
     
     print("Creating Hierarchical MPC Arm with Learning...")
     print(f"  - Base weights: {base_weights}")
     print(f"    {FEATURE_NAMES}")
     if use_physical_input:
         print("  - Expert: HUMAN (physical input)")
+        print("  - Expert weights: None (human provides corrections)")
     else:
-        print("  - Expert: simulated")
+        print("  - Expert: SIMULATED")
+        print(f"  - Expert weights: {expert_weights}")
     print()
-
-    utterance = "Go faster"
-    api_key = os.getenv("OPENAI_API_KEY")
-
-    # Create hierarchical MPC arm first without learner
-    # When using physical input, human IS the expert (no simulated expert weights)
-    if use_physical_input:
-        expert_weights = None  # Human is the expert
-    else:
-        expert_weights = DEFAULT_EXPERT_WEIGHTS.copy()
     
     arm = HierarchicalMPCArm(
         world=world,
         learner=None,  # Will set after creation
         utterance=utterance,
         expert_weights=expert_weights,
-        intervention_interval=(999999, 999999),  # Disable simulated intervention
+        intervention_interval=(780, 790),  # Disable simulated intervention
         base_weights=base_weights,
         seed=42,
         planner_horizon=8,   # Short horizon for speed
@@ -229,6 +298,16 @@ def main():
             reward = arm.reward_fn(obs)
             total_reward += reward
             cumulative_rewards.append(total_reward)
+            
+            # Render counterfactual marker during simulated intervention
+            # (shows where robot "would be" without expert intervention)
+            if not use_physical_input and arm.recording and arm.robot_sim_state is not None:
+                counterfactual_pos = arm.robot_sim_state["ee_pos"]
+                actual_pos = obs["ee_pos"]
+                try:
+                    render_counterfactual_marker(world.env.viewer, counterfactual_pos, actual_pos)
+                except Exception as e:
+                    pass  # Silently ignore rendering errors
             
             # Render
             world.render()

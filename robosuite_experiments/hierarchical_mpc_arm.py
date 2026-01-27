@@ -135,8 +135,11 @@ class HierarchicalMPCArm(BaseRationalArm):
         if self.physical_intervention_active:
             return True
         
-        # Simulated intervention (time-based)
-        return self.intervention_start <= self.timestep <= self.intervention_end
+        # Simulated intervention (time-based) - only if expert weights exist
+        if self.expert_weights is not None:
+            return self.intervention_start <= self.timestep <= self.intervention_end
+        
+        return False
     
     def signal_physical_intervention(self, obs, robot_action, human_action):
         """
@@ -187,10 +190,9 @@ class HierarchicalMPCArm(BaseRationalArm):
         })
         
         # Update simulated robot state for next timestep
-        # Simple dynamics: ee_pos += action[:3] * dt
-        dt = 0.05  # 20Hz control
+        # OSC_POSE actions are delta positions (not velocities), so integrate directly
         self.physical_robot_sim_state["ee_vel"] = robot_action[:3].copy()
-        self.physical_robot_sim_state["ee_pos"] = self.physical_robot_sim_state["ee_pos"] + robot_action[:3] * dt
+        self.physical_robot_sim_state["ee_pos"] = self.physical_robot_sim_state["ee_pos"] + robot_action[:3]
         
         # Block follows EE during transport (assuming grasped)
         if self.task_phase in ["transport", "move"]:
@@ -442,6 +444,12 @@ class HierarchicalMPCArm(BaseRationalArm):
     
     def get_expert_action(self, obs):
         """Get expert action using same hierarchical structure but expert weights."""
+        if self.expert_weights is None:
+            raise ValueError(
+                "get_expert_action called but expert_weights is None. "
+                "For physical input mode, use signal_physical_intervention() instead."
+            )
+        
         subgoal, gripper_state = self._get_subgoal_and_gripper(obs)
         
         # MPC ONLY for transport, direct control for everything else

@@ -5,7 +5,7 @@ Base rational arm agent that uses reward weights to guide behavior.
 import numpy as np
 from arm_world import ArmWorld
 import arm_feature_utils as feature_utils
-
+from robosuite_experiments.arm_feature_utils import DEFAULT_BASE_WEIGHTS
 
 class BaseRationalArm:
     """
@@ -31,9 +31,9 @@ class BaseRationalArm:
         """
         self.world = world
         
-        # TODO: This is old
+
         if weights is None:
-            weights = np.array([1.0, 1.0, 1.0, 2.0, 2.0])
+            weights = DEFAULT_BASE_WEIGHTS.copy()
         
         self.weights = np.array(weights, dtype=np.float32)
         
@@ -50,9 +50,9 @@ class BaseRationalArm:
             obs: Observation dictionary from environment
             
         Returns:
-            numpy array of feature values [5 features]
+            numpy array of feature values [7 features]
         """
-        return feature_utils.compute_features(obs, include_red_dist=True, include_zones=False)
+        return feature_utils.compute_features(obs, include_red_dist=False, include_zones=True)
     
     def reward_fn(self, obs):
         """
@@ -92,5 +92,5 @@ class BaseRationalArm:
         Returns:
             Dictionary mapping feature names to descriptions
         """
-        return feature_utils.get_feature_descriptions(include_red_dist=True, include_zones=False)
+        return feature_utils.get_feature_descriptions(include_red_dist=False, include_zones=True)
 

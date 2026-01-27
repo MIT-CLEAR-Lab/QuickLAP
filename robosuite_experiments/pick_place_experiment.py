@@ -14,8 +14,9 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from arm_world import ArmWorld
-from intervention_arm import InterventionArm
+from hierarchical_mpc_arm import HierarchicalMPCArm
 from robosuite.devices import Keyboard
+from robosuite_experiments.arm_feature_utils import DEFAULT_EXPERT_WEIGHTS, DEFAULT_BASE_WEIGHTS
 
 
 class PickPlaceExperiment:
@@ -68,7 +69,7 @@ class PickPlaceExperiment:
         learner_factory: Callable,
         seed: int,
         utterance: str = "Go faster"
-    ) -> tuple[ArmWorld, InterventionArm]:
+    ) -> tuple[ArmWorld, HierarchicalMPCArm]:
         """
         Set up the robosuite environment and intervention arm.
         
@@ -98,7 +99,7 @@ class PickPlaceExperiment:
         # We'll pass a temporary arm to get the learner, then create the real arm
         
         # Base weights for robot (initial policy)
-        base_weights = np.array([1.0, 1.0, 1.0, 2.0, 2.0])
+        base_weights = DEFAULT_BASE_WEIGHTS.copy()
         
         if self.use_physical_input:
             # When using physical input, human IS the expert
@@ -106,15 +107,15 @@ class PickPlaceExperiment:
             expert_weights = None
         else:
             # Simulated expert weights: [red_dist, green_dist, velocity, collision, joints]
-            expert_weights = np.array([1.0, 1.0, 10.0, 2.0, 2.0])
+            expert_weights = DEFAULT_EXPERT_WEIGHTS.copy()
         
         # Create arm first without learner
-        arm = InterventionArm(
+        arm = HierarchicalMPCArm(
             world=world,
             learner=None,  # Will set after creation
             utterance=utterance,
             expert_weights=expert_weights,
-            intervention_interval=(50, 70),
+            intervention_interval=(780, 790),
             base_weights=base_weights,
             seed=seed,
         )
@@ -125,13 +126,13 @@ class PickPlaceExperiment:
         
         return world, arm
     
-    def get_metrics(self, t: int, arm: InterventionArm, obs: dict) -> dict[str, Any]:
+    def get_metrics(self, t: int, arm: HierarchicalMPCArm, obs: dict) -> dict[str, Any]:
         """
         Collect metrics for current timestep.
         
         Args:
             t: Current timestep
-            arm: InterventionArm instance
+            arm: HierarchicalMPCArm instance
             obs: Current observation
             
         Returns:
@@ -164,7 +165,7 @@ class PickPlaceExperiment:
             return np.array([])
         return np.array([step["features"] for step in self.step_data])
     
-    def evaluate_performance(self, arm: InterventionArm) -> float:
+    def evaluate_performance(self, arm: HierarchicalMPCArm) -> float:
         """
         Evaluate overall performance.
         
@@ -172,7 +173,7 @@ class PickPlaceExperiment:
         When using physical input: uses cumulative reward based on current learned weights.
         
         Args:
-            arm: InterventionArm instance
+            arm: HierarchicalMPCArm instance
             
         Returns:
             Performance metric (higher is better)

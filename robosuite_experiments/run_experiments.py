@@ -31,9 +31,10 @@ from interact_drive.learner.oracle_learner import OracleLearner
 dotenv.load_dotenv()
 
 # Oracle (expert) weights for the pick-and-place task
-# [red_dist, green_dist, velocity, collision, joints]
+# [green_clearance, velocity, collision, joints, block_to_zone, zone_c_clearance, height_maintain]
+# Note: clearance features use POSITIVE weights (higher = stay farther = safer)
 ORACLE_WEIGHTS = {
-    "pick_place": np.array([1.0, 1.0, 10.0, 2.0, 2.0]),
+    "pick_place": np.array([8.0, 1.0, 1.0, 1.0, 25.0, 2.0, 0.0]),
 }
 
 # Parse command line arguments
@@ -51,9 +52,20 @@ parser.add_argument(
     help="Notes for the experiment, to be saved in the log",
 )
 parser.add_argument(
+    "--horizon",
+    type=int,
+    default=1200,
+    help="Episode length in timesteps (default: 1200)",
+)
+parser.add_argument(
     "--physical-input",
     action="store_true",
     help="Enable keyboard input for human intervention",
+)
+parser.add_argument(
+    "--log-llm",
+    action="store_true",
+    help="Log LLM inputs and outputs for every experiment",
 )
 args = parser.parse_args()
 
@@ -67,39 +79,49 @@ EXPERIMENTS = {
 
 # Define utterances to test
 UTTERANCES = [
-    ("Go faster", "Go_faster"),
+    # ("Avoid the obstacle.", "Avoid_obstacle"),
+    # ("Steer clear of the green block.", "Steer_clear_block"),
+    ("Move.", "Move"),
+    # ("AHH!", "AHH"),
+    # ("Go left", "Go_left"),
+    # ("Get away", "Get_away"),
 ]
 
 # Define learner factories (using robosuite-compatible versions)
-LEARNER_FACTORIES = {
-    "naive": lambda arm, utterance: RobosuitePHRILearner(
-        arm, log_file=f"logs/robosuite_naive_{utterance}.txt"
-    ),
-    "masked_dphi": lambda arm, utterance: RobosuiteMaskedLLMPHRILearner(
-        arm,
-        utterance,
-        arm.get_feature_descriptions(),
-        openai_api_key=api_key,
-        selector="d_phi",
-    ),
-    "adapt_gated_llm": lambda arm, utterance: RobosuiteAdaptGatedLLMPHRILearner(
-        arm, utterance, arm.get_feature_descriptions(), openai_api_key=api_key
-    ),
-    "quicklap_language_only": lambda arm, utterance: RobosuiteAdaptGatedLLMPHRILearner(
-        arm,
-        utterance,
-        arm.get_feature_descriptions(),
-        openai_api_key=api_key,
-        method=2,
-    ),
-    "no_feature_context_language_only": lambda arm, utterance: RobosuiteAdaptGatedLLMPHRILearner(
-        arm,
-        utterance,
-        arm.get_feature_descriptions(),
-        openai_api_key=api_key,
-        method=3,
-    ),
-}
+def get_learner_factories(log_llm=False):
+    return {
+        "naive": lambda arm, utterance: RobosuitePHRILearner(
+            arm, log_file=f"logs/robosuite_naive_{utterance}.txt"
+        ),
+        "masked_dphi": lambda arm, utterance: RobosuiteMaskedLLMPHRILearner(
+            arm,
+            utterance,
+            arm.get_feature_descriptions(),
+            openai_api_key=api_key,
+            selector="d_phi",
+            log_llm=log_llm,
+        ),
+        "adapt_gated_llm": lambda arm, utterance: RobosuiteAdaptGatedLLMPHRILearner(
+            arm, utterance, arm.get_feature_descriptions(), openai_api_key=api_key,
+            log_llm=log_llm,
+        ),
+        "quicklap_language_only": lambda arm, utterance: RobosuiteAdaptGatedLLMPHRILearner(
+            arm,
+            utterance,
+            arm.get_feature_descriptions(),
+            openai_api_key=api_key,
+            method=2,
+            log_llm=log_llm,
+        ),
+        "no_feature_context_language_only": lambda arm, utterance: RobosuiteAdaptGatedLLMPHRILearner(
+            arm,
+            utterance,
+            arm.get_feature_descriptions(),
+            openai_api_key=api_key,
+            method=3,
+            log_llm=log_llm,
+        ),
+    }
 
 
 def normalize_weights(weights):
@@ -193,6 +215,7 @@ for world_name, world_cls in EXPERIMENTS.items():
         experiment = world_cls(
             exp_name=f"{world_name}_oracle",
             use_physical_input=args.physical_input,
+            horizon=args.horizon,
         )
         
         reward, feature_trajectory, learned_weights = experiment.run(
@@ -215,6 +238,8 @@ print("\n" + "="*80)
 print("RUNNING LEARNER EXPERIMENTS")
 print("="*80)
 
+LEARNER_FACTORIES = get_learner_factories(log_llm=args.log_llm)
+
 for world_name, world_cls in EXPERIMENTS.items():
     gt_weights = ORACLE_WEIGHTS[world_name]
     
@@ -229,6 +254,7 @@ for world_name, world_cls in EXPERIMENTS.items():
                 experiment = world_cls(
                     exp_name=f"{world_name}_{run_name}",
                     use_physical_input=args.physical_input,
+                    horizon=args.horizon,
                 )
                 
                 reward, feature_trajectory, learned_weights = experiment.run(
