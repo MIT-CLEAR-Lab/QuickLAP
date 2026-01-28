@@ -15,6 +15,7 @@ from arm_feature_utils import (
     DEFAULT_BASE_WEIGHTS,
     FEATURE_NAMES,
 )
+from audio_recorder import AudioRecorder, AUDIO_AVAILABLE
 
 
 class UserArm(BaseRationalArm):
@@ -29,6 +30,9 @@ class UserArm(BaseRationalArm):
         self,
         world: ArmWorld,
         learner=None,
+        openai_api_key=None,
+        use_audio=False,
+        audio_save_dir=None,
         expert_weights=None,
         base_weights=None,
         seed=None,
@@ -56,6 +60,10 @@ class UserArm(BaseRationalArm):
         super().__init__(world, weights=base_weights, seed=seed)
 
         self.learner = learner
+
+        self.use_audio = use_audio
+        self.audio_save_dir = audio_save_dir
+        self.audio_recording = False
 
         # Tracking variables
         self.timestep = 0
@@ -178,6 +186,62 @@ class UserArm(BaseRationalArm):
             self.physical_robot_sim_state["red_block_pos"] = (
                 self.physical_robot_sim_state["ee_pos"] + block_offset
             )
+
+    def start_audio_recording(self) -> None:
+        """Start audio recording when physical intervention begins."""
+        if self.audio_recorder and not self.audio_recording:
+            try:
+                # Generate unique filename for this recording
+                timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
+                if self.audio_save_dir:
+                    audio_filename = f"intervention_{self.time_step}_{timestamp}.wav"
+                    self.current_audio_path = os.path.join(
+                        self.audio_save_dir, audio_filename
+                    )
+                else:
+                    self.current_audio_path = None  # Will use temp file
+
+                self.audio_recording = True
+                print(
+                    f"Started audio recording for intervention at timestep {self.time_step}"
+                )
+                print("Please explain your intervention while driving...")
+
+                # Start recording with silence detection in a background thread
+                import threading
+
+                def record_audio():
+                    try:
+                        self.current_audio_path = (
+                            self.audio_recorder.record_with_silence_detection(
+                                output_path=self.current_audio_path,
+                                silence_threshold=0.008,
+                                silence_duration=1.5,  # Stop after 1.5s of silence
+                                max_duration=10.0,  # Max 10 seconds
+                                debug=False,
+                            )
+                        )
+                        print(f"Audio recording completed: {self.current_audio_path}")
+                    except Exception as e:
+                        print(f"Audio recording error: {e}")
+                        self.current_audio_path = None
+                    finally:
+                        self.audio_recording = False
+
+                audio_thread = threading.Thread(target=record_audio, daemon=True)
+                audio_thread.start()
+
+            except Exception as e:
+                print(f"Failed to start audio recording: {e}")
+                self.audio_recording = False
+                self.current_audio_path = None
+
+    def stop_audio_recording(self) -> str:
+        """Stop audio recording and return path to saved file."""
+        if self.audio_recording:
+            print("Audio recording will stop automatically via silence detection")
+
+        return self.current_audio_path
 
     def update_physical_intervention_state(self, utterance=None):
         """
@@ -571,6 +635,7 @@ class UserArm(BaseRationalArm):
                 self.recording = True
                 self.robot_trajectory = []
                 self.human_trajectory = []
+                self.start_audio_recording()
                 # Initialize simulated robot state from current observation
                 self.robot_sim_state = {
                     "ee_pos": obs["ee_pos"].copy(),
@@ -654,7 +719,24 @@ class UserArm(BaseRationalArm):
                     "state": [step["obs"] for step in self.human_trajectory],
                     "control": [step["control"] for step in self.human_trajectory],
                 }
+                final_audio_path = self.stop_audio_recording()
 
+                # Wait a bit for the audio recording to complete
+                max_wait_time = 5.0  # seconds
+                wait_start = time.time()
+                while (
+                    self.audio_recording and (time.time() - wait_start) < max_wait_time
+                ):
+                    time.sleep(0.1)
+
+                # Update the learner with the audio file path
+                if final_audio_path and os.path.exists(final_audio_path):
+                    self.learner.set_audio_file_path(final_audio_path)
+                    print(
+                        f"Processing intervention with speech input from: {final_audio_path}"
+                    )
+                else:
+                    print("No audio file available, using default explanation")
                 # Update weights via learner
                 if self.learner is not None:
                     self.learner.update_weights(robot_traj, human_traj)

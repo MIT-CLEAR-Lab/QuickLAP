@@ -28,7 +28,8 @@ import zmq
 # Load environment variables
 dotenv.load_dotenv()
 
-SERVER_IP = '128.30.29.25'
+SERVER_IP = "128.30.29.25"
+
 
 def serialize(obj):
     if isinstance(obj, np.ndarray):
@@ -40,6 +41,7 @@ def serialize(obj):
     elif isinstance(obj, (list, tuple)):
         return [serialize(v) for v in obj]
     return obj
+
 
 class UserStudyManager:
     """Manages user studies across multiple environments with unified data storage."""
@@ -135,9 +137,7 @@ class UserStudyManager:
             else:
                 status = "⭕ Pending"
 
-            print(
-                f"{i+1:2d}. {status:12} {method_name:17}"
-            )
+            print(f"{i+1:2d}. {status:12} {method_name:17}")
 
         progress = (self.current_experiment_index / len(self.experiment_sequence)) * 100
         print(
@@ -191,8 +191,12 @@ class UserStudyManager:
                 planner_n_iter=20,  # More iterations needed when starting from zero
             )
             arm.learner = RobosuiteAdaptGatedLLMPHRILearner(
-                arm, None, arm.get_feature_descriptions(), openai_api_key=self.openai_api_key,
-                use_speech_input=True, audio_file_path=None
+                arm,
+                "",
+                arm.get_feature_descriptions(),
+                openai_api_key=self.openai_api_key,
+                use_speech_input=True,
+                audio_file_path=None,
             )
             robot = world.env.robots[0]
 
