@@ -7,3 +7,4 @@ __pycache__/
 results/
 .venv
 user_study/
+participants.csv

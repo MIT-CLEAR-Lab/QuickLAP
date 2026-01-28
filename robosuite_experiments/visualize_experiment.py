@@ -45,6 +45,7 @@ from arm_feature_utils import (
 
 # Robosuite's built-in keyboard device
 from robosuite.devices import Keyboard
+from franka_spacemouse import SpaceMouseInput
 
 
 import zmq
@@ -118,6 +119,8 @@ def _rotation_matrix_from_direction(direction):
     rot = np.column_stack([x_axis, y_axis, direction])
     return rot
 
+t = 0
+mouse = SpaceMouseInput(sensitivity=.003)
 
 def main():
     """Run experiment with hierarchical MPC and visualization."""
@@ -291,9 +294,13 @@ def main():
             # Step environment
             obs, _, done, _ = world.step(action)
 
-            state = np.hstack([robot._joint_positions, robot._joint_velocities, [action[-1]]]) #TODO: Add gripper state somehow..            
-            sock.send(state.tobytes())             # blocking send
-            reply = sock.recv()                    # blocking recieve
+
+            t+= 1
+            if t > 25:
+                state = np.hstack([robot._joint_positions, robot._joint_velocities, [action[-1]]]) #TODO: Add gripper state somehow..            
+                sock.send(state.tobytes())             # blocking send
+                reply = sock.recv()                    # blocking recieve
+                t=0
             
             # Compute reward
             reward = arm.reward_fn(obs)

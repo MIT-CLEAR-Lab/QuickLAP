@@ -21,12 +21,25 @@ from arm_world import ArmWorld
 from arm_feature_utils import DEFAULT_BASE_WEIGHTS, DEFAULT_EXPERT_WEIGHTS
 from franka_spacemouse import SpaceMouseInput
 from user_arm import UserArm
+from robosuite_learners import RobosuiteAdaptGatedLLMPHRILearner
 
 import zmq
 
 # Load environment variables
 dotenv.load_dotenv()
 
+SERVER_IP = '128.30.29.25'
+
+def serialize(obj):
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.generic):
+        return obj.item()
+    elif isinstance(obj, dict):
+        return {k: serialize(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [serialize(v) for v in obj]
+    return obj
 
 class UserStudyManager:
     """Manages user studies across multiple environments with unified data storage."""
@@ -36,6 +49,11 @@ class UserStudyManager:
         "phri": "Physical Correction Only",
         "llm": "Physical Correction + Language",
         "language": "Language Correction Only",
+    }
+    METHODS = {
+        "phri": 0,
+        "llm": 1,
+        "language": 2,
     }
 
     def __init__(self, participant_id: int, experiment_sequence: list[str]):
@@ -93,7 +111,7 @@ class UserStudyManager:
 
         ctx = zmq.Context()
         self.sock = ctx.socket(zmq.REQ)
-        self.sock.connect("tcp://127.0.0.1:5555")
+        self.sock.connect(f"tcp://{SERVER_IP}:5555")
 
         print(f"\nUser Study Session Started")
         print(f"Participant ID: {self.participant_id}")
@@ -118,7 +136,7 @@ class UserStudyManager:
                 status = "⭕ Pending"
 
             print(
-                f"{i+1:2d}. {status:12} {method_name:17} | {env_config['description']}"
+                f"{i+1:2d}. {status:12} {method_name:17}"
             )
 
         progress = (self.current_experiment_index / len(self.experiment_sequence)) * 100
@@ -166,11 +184,15 @@ class UserStudyManager:
             )
             arm = UserArm(
                 world=world,
-                learner=None,  # Will set after creation
+                learner=None,
                 base_weights=DEFAULT_BASE_WEIGHTS.copy(),
                 seed=42,
                 planner_horizon=8,  # Short horizon for speed
                 planner_n_iter=20,  # More iterations needed when starting from zero
+            )
+            arm.learner = RobosuiteAdaptGatedLLMPHRILearner(
+                arm, None, arm.get_feature_descriptions(), openai_api_key=self.openai_api_key,
+                use_speech_input=True, audio_file_path=None
             )
             robot = world.env.robots[0]
 
@@ -178,9 +200,9 @@ class UserStudyManager:
             exp_config_data = {
                 "method": method,
                 "timestamp": datetime.now().isoformat(),
-                "optimal_weights": DEFAULT_EXPERT_WEIGHTS,
+                "optimal_weights": DEFAULT_EXPERT_WEIGHTS.tolist(),
                 "initial_weights": arm.weights.tolist(),
-                "initial_observation": world.get_observation(),
+                "initial_observation": serialize(world.get_observation()),
                 "learner_type": method,
             }
 
@@ -190,21 +212,21 @@ class UserStudyManager:
             # Run simulation
             step_data = []
 
-            # Set window position for visualization
-            os.environ["SDL_VIDEO_WINDOW_POS"] = "200,100"
-            print("\nStarting simulation...")
-
             obs = world.get_observation()
             for t in range(world.horizon):
                 step_start_time = time.time()
+                print(f"t={t}")
                 robot_action = arm.get_action(obs)
                 action = robot_action.copy()
 
                 state = np.hstack(
                     [robot._joint_positions, robot._joint_velocities, [0]]
-                )  # TODO: Add gripper state somehow..
+                )  # TODO: Add gripper state somehow...
+                print(f"Sending state {state}")
                 self.sock.send(state.tobytes())  # blocking send
+                print("Sent")
                 reply = self.sock.recv()
+                print("Got reply")
 
                 # Add keyboard input if enabled (using robosuite's built-in device)
                 # Only allow physical input during TRANSPORT/MOVE phase (when human guidance matters)
@@ -259,9 +281,9 @@ class UserStudyManager:
                 current_features = arm.features(obs)
                 step_metrics = {
                     "timestep": t,
-                    "obs": obs,
+                    "obs": serialize(obs),
                     "weights": arm.weights.tolist(),
-                    "features": [float(f) for f in current_features.numpy()],
+                    "features": current_features.tolist(),
                     "reward": reward,
                     "is_intervention": arm.is_intervention(),
                     "time": time.time(),

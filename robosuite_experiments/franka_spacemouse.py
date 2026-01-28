@@ -15,10 +15,10 @@ to get the correct event id!
 
 class SpaceMouseInput():
 
-    def __init__(self):
+    def __init__(self, sensitivity=3e-3):
         self.device =InputDevice("/dev/input/event3")
-        self.scale_trans = 0.003
-        self.scale_rot = 0.003
+        self.scale_trans = sensitivity
+        self.scale_rot = sensitivity
         self.axes = {ecodes.ABS_X:0, ecodes.ABS_Y:0, ecodes.ABS_Z:0,
             ecodes.ABS_RX:0, ecodes.ABS_RY:0, ecodes.ABS_RZ:0}
         self.buttons = {256:0, 257:0}

@@ -179,7 +179,7 @@ class UserArm(BaseRationalArm):
                 self.physical_robot_sim_state["ee_pos"] + block_offset
             )
 
-    def update_physical_intervention_state(self):
+    def update_physical_intervention_state(self, utterance=None):
         """
         Update physical intervention state each timestep.
 
@@ -196,7 +196,7 @@ class UserArm(BaseRationalArm):
                 print(
                     f"  Recorded {len(self.robot_trajectory)} timesteps of intervention"
                 )
-                print(f"  Utterance: '{self.utterance}'")
+                print(f"  Utterance: '{utterance}'")
 
                 if len(self.robot_trajectory) > 0 and self.learner is not None:
                     # Convert to format expected by learner

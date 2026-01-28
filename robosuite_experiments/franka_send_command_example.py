@@ -49,7 +49,7 @@ env.viewer.add_keypress_callback(device.on_press)
 # -----------------------
 # Spacemouse device
 # -----------------------
-mouse = SpaceMouseInput()
+mouse = SpaceMouseInput(sensitivity=.003)
 
 
 
@@ -67,7 +67,7 @@ if __name__ == '__main__':
     sock = ctx.socket(zmq.REQ)
     # sock.connect("tcp://127.0.0.1:5555")
 
-    SERVER_IP = '128.30.29.23'
+    SERVER_IP = '128.30.29.25'
     sock.connect(f"tcp://{SERVER_IP}:5555")
 
     obs = env.reset()
@@ -107,6 +107,7 @@ if __name__ == '__main__':
         sock.send(state.tobytes())             # blocking send
         # print(f'sent: {state}')
         reply = sock.recv()                # blocking receive
+        # print(f"Received {reply}")
 
         # ~20 Hz
         dt = time.time() - start
