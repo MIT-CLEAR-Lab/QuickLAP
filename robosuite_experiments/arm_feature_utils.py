@@ -31,7 +31,7 @@ FEATURE_NAMES = [
 
 # Default base weights for robot (before learning)
 DEFAULT_BASE_WEIGHTS = np.array([
-    1.0,    # green_clearance: avoid green block (positive = stay far)
+    0.0,    # green_clearance: avoid green block (positive = stay far)
     1.0,    # velocity: move at good speed
     1.0,    # collision: stay safe (but constant at large distances)
     1.0,    # joints: stay away from joint limits
@@ -43,7 +43,7 @@ DEFAULT_BASE_WEIGHTS = np.array([
 # Default expert weights (what the human demonstrator physical input represents)
 DEFAULT_EXPERT_WEIGHTS = np.array([
     15.0,   # green_clearance: strongly avoid green block (positive = stay far)
-    1.0,    # velocity: expert moves faster
+    3.0,    # velocity: expert moves faster
     1.0,    # collision: stay safe
     1.0,    # joints: stay safe
     20.0,   # block_to_zone: strongly prioritize moving to target
@@ -52,7 +52,7 @@ DEFAULT_EXPERT_WEIGHTS = np.array([
 ], dtype=np.float32)
 
 # Transport height for the height maintenance feature (meters)
-DEFAULT_TRANSPORT_HEIGHT = 1.05
+DEFAULT_TRANSPORT_HEIGHT = 1.02
 
 # =============================================================================
 # SPATIAL LAYOUT CONTEXT (for LLM prompts)
@@ -62,11 +62,11 @@ DEFAULT_TRANSPORT_HEIGHT = 1.05
 
 SPATIAL_LAYOUT_CONTEXT = """
 Environment Spatial Layout:
-- Table surface is at z=0.90m
-- Zone A (start): x=-0.2, y=-0.3 
-- Zone B (target): x=0.2, y=0.3 
-- Zone C (obstacle zone): x=-0.15, y=0.25 
-- Green block (obstacle): x=0.05, y=-0.05 
+- Table surface is at z=0.95m
+- Zone A (start): x=-0.3, y=-0.3 
+- Zone B (target): x=0.1, y=0.3 
+- Zone C (obstacle zone): x=-0.25, y=0.15 
+- Green block (obstacle): x=-0.05, y=0.05 
 """
 
 

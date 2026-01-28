@@ -12,10 +12,14 @@ On macOS, run this with: mjpython visualize_experiment.py
 On Linux, run with: python visualize_experiment.py
 
 Physical Input Controls (when enabled):
-  Position: W/S (Y), A/D (X), Q/E (Z)
-  Orientation: I/K (pitch), J/L (yaw), U/O (roll)
-  Gripper: SPACE to toggle
-  Exit: ESC
+  Keyboard:
+    Position: W/S (Y), A/D (X), Q/E (Z)
+    Orientation: I/K (pitch), J/L (yaw), U/O (roll)
+    Gripper: SPACE to toggle
+    Exit: ESC
+  SpaceMouse (--spacemouse flag):
+    6-DOF control with translation and rotation
+    Left button: toggle gripper
 """
 
 import sys
@@ -46,12 +50,21 @@ from arm_feature_utils import (
 # Robosuite's built-in keyboard device
 from robosuite.devices import Keyboard
 
+# SpaceMouse input (Linux only, requires evdev)
+try:
+    from franka_spacemouse import SpaceMouseInput
+    SPACEMOUSE_AVAILABLE = True
+except ImportError:
+    SPACEMOUSE_AVAILABLE = False
 
-import zmq
-ctx = zmq.Context()
-sock = ctx.socket(zmq.REQ)
-IP_ADDRESS = '128.30.29.23'
-sock.connect(f"tcp://{IP_ADDRESS}:5555")
+
+# ZMQ for remote robot communication (optional)
+ZMQ_AVAILABLE = False
+try:
+    import zmq
+    ZMQ_AVAILABLE = True
+except ImportError:
+    pass
 
 
 
@@ -140,9 +153,64 @@ def main():
         default=2000,
         help="Episode length in timesteps (default: 2000)"
     )
+    parser.add_argument(
+        "--spacemouse",
+        action="store_true",
+        help="Enable SpaceMouse input for human intervention (Linux only, requires evdev)"
+    )
+    parser.add_argument(
+        "--spacemouse-device",
+        type=str,
+        default="/dev/input/event3",
+        help="SpaceMouse device path (default: /dev/input/event3). Run 'ls -l /dev/input/by-id/*SpaceMouse*' to find correct device."
+    )
+    parser.add_argument(
+        "--zmq",
+        action="store_true",
+        help="Enable ZMQ communication with remote robot"
+    )
+    parser.add_argument(
+        "--zmq-address",
+        type=str,
+        default="128.30.29.23",
+        help="ZMQ server IP address (default: 128.30.29.23)"
+    )
+    parser.add_argument(
+        "--zmq-port",
+        type=int,
+        default=5555,
+        help="ZMQ server port (default: 5555)"
+    )
     args = parser.parse_args()
     
-    use_physical_input = args.physical_input
+    use_physical_input = args.physical_input or args.spacemouse
+    use_keyboard = args.physical_input
+    use_spacemouse = args.spacemouse
+    
+    # Check spacemouse availability
+    if use_spacemouse and not SPACEMOUSE_AVAILABLE:
+        print("WARNING: SpaceMouse requested but evdev not available (Linux only).")
+        print("         Falling back to keyboard-only mode.")
+        use_spacemouse = False
+        if not use_keyboard:
+            use_keyboard = True  # Enable keyboard as fallback
+    
+    # Initialize ZMQ socket for remote robot communication
+    zmq_socket = None
+    if args.zmq:
+        if not ZMQ_AVAILABLE:
+            print("WARNING: ZMQ requested but pyzmq not installed.")
+            print("         Install with: pip install pyzmq")
+        else:
+            try:
+                zmq_ctx = zmq.Context()
+                zmq_socket = zmq_ctx.socket(zmq.REQ)
+                zmq_address = f"tcp://{args.zmq_address}:{args.zmq_port}"
+                zmq_socket.connect(zmq_address)
+                print(f"ZMQ connected to {zmq_address}")
+            except Exception as e:
+                print(f"WARNING: Failed to connect ZMQ socket: {e}")
+                zmq_socket = None
     
     print("="*70)
     print("HIERARCHICAL MPC ARM - WITH INTERVENTION LEARNING")
@@ -153,12 +221,17 @@ def main():
     print("  3. 7 features including 'block_to_target_zone', 'zone_c_clearance', and 'height_maintain'")
     if use_physical_input:
         print("  4. PHYSICAL INPUT ENABLED - YOU are the expert!")
-        print("     Controls: W/S (Y), A/D (X), Q/E (Z), SPACE (gripper), ESC (exit)")
+        if use_keyboard:
+            print("     Keyboard: W/S (Y), A/D (X), Q/E (Z), SPACE (gripper), ESC (exit)")
+        if use_spacemouse:
+            print(f"     SpaceMouse: 6-DOF control (device: {args.spacemouse_device})")
     else:
         print("  4. Simulated expert intervention")
         print("     🔴 RED SPHERE shows counterfactual (where robot WOULD be without intervention)")
         print("     🟠 ORANGE LINE shows divergence between counterfactual and actual position")
     print("  5. Weight learning from intervention using QuickLAP")
+    if zmq_socket is not None:
+        print(f"  6. ZMQ remote robot sync enabled ({args.zmq_address}:{args.zmq_port})")
     print()
     print("Note: On macOS, this requires mjpython!")
     print()
@@ -202,7 +275,8 @@ def main():
         learner=None,  # Will set after creation
         utterance=utterance,
         expert_weights=expert_weights,
-        intervention_interval=(780, 790),  # Disable simulated intervention
+        intervention_interval=(780, 800),  # Disable simulated intervention
+        # intervention_interval=(99999, 99999),  # Disable simulated intervention
         base_weights=base_weights,
         seed=42,
         planner_horizon=8,   # Short horizon for speed
@@ -220,9 +294,11 @@ def main():
         print(f"  [{i}] {name}: {desc[:80]}...")
     print()
     
-    # Initialize robosuite's built-in keyboard device if enabled
+    # Initialize input devices
     keyboard_device = None
-    if use_physical_input:
+    spacemouse_device = None
+    
+    if use_keyboard:
         keyboard_device = Keyboard(
             env=world.env,
             pos_sensitivity=args.input_scale,
@@ -235,6 +311,24 @@ def main():
         print("  Rotation: mouse drag or I/K, J/L, U/O")
         print("  Gripper: space bar")
         print()
+    
+    if use_spacemouse:
+        try:
+            # Create SpaceMouse with custom device path if specified
+            spacemouse_device = SpaceMouseInput()
+            # Override device path if user specified one
+            if args.spacemouse_device != "/dev/input/event3":
+                from evdev import InputDevice
+                spacemouse_device.device = InputDevice(args.spacemouse_device)
+            print(f"SpaceMouse initialized (device: {args.spacemouse_device})!")
+            print("  6-DOF control: translate and rotate")
+            print("  Left button: toggle gripper")
+            print()
+        except Exception as e:
+            print(f"WARNING: Failed to initialize SpaceMouse: {e}")
+            print("         Continuing without SpaceMouse.")
+            spacemouse_device = None
+            use_spacemouse = False
     
     try:
         robot = world.env.robots[0]
@@ -255,34 +349,51 @@ def main():
             # Track if human provided input this frame
             human_input_this_frame = False
             
-            # Add keyboard input if enabled (using robosuite's built-in device)
+            # Add physical input if enabled (keyboard and/or spacemouse)
             # Only allow physical input during TRANSPORT/MOVE phase (when human guidance matters)
-            # Skip first 10 frames to let keyboard device initialize (avoid false positives)
+            # Skip first 10 frames to let devices initialize (avoid false positives)
             in_transport_phase = arm.task_phase in ["transport", "move"]
-            if use_physical_input and keyboard_device and t >= 10 and in_transport_phase:
-                # Get human input from keyboard device
-                # Returns dict with 'right_delta' (6,) and 'right_gripper' keys
-                device_action = keyboard_device.input2action()
+            if use_physical_input and t >= 10 and in_transport_phase:
+                human_delta = np.zeros(6)
                 
-                if device_action is not None:
-                    right_delta = device_action.get("right_delta", np.zeros(6))
-                    right_gripper = device_action.get("right_gripper", 0)
-                    if isinstance(right_gripper, np.ndarray):
-                        right_gripper = float(right_gripper.item()) if right_gripper.size == 1 else 0
+                # Get keyboard input (robosuite's built-in device)
+                if keyboard_device is not None:
+                    device_action = keyboard_device.input2action()
+                    if device_action is not None:
+                        right_delta = device_action.get("right_delta", np.zeros(6))
+                        right_gripper = device_action.get("right_gripper", 0)
+                        if isinstance(right_gripper, np.ndarray):
+                            right_gripper = float(right_gripper.item()) if right_gripper.size == 1 else 0
+                        human_delta += right_delta
+                
+                # Get spacemouse input
+                if spacemouse_device is not None:
+                    spacemouse_cmd = spacemouse_device.get_input()
+                    # spacemouse_cmd is [x, y, z, rx, ry, rz, gripper]
+                    # Map to action delta: position (first 3) and orientation (next 3)
+                    spacemouse_delta = np.array([
+                        spacemouse_cmd[0],   # x translation
+                        spacemouse_cmd[1],   # y translation
+                        spacemouse_cmd[2],   # z translation
+                        spacemouse_cmd[3],   # rx rotation
+                        spacemouse_cmd[4],   # ry rotation
+                        spacemouse_cmd[5],   # rz rotation
+                    ])
+                    human_delta += spacemouse_delta
+                
+                # Check if human is actively providing input (position/orientation only)
+                # Use higher thresholds to avoid false positives from device noise
+                # NOTE: We ignore gripper input during transport - robot must keep holding the block
+                delta_magnitude = np.linalg.norm(human_delta)
+                if delta_magnitude > 0.01:
+                    human_input_this_frame = True
                     
-                    # Check if human is actively providing input (position/orientation only)
-                    # Use higher thresholds to avoid false positives from device noise
-                    # NOTE: We ignore gripper input during transport - robot must keep holding the block
-                    delta_magnitude = np.linalg.norm(right_delta)
-                    if delta_magnitude > 0.01:
-                        human_input_this_frame = True
-                        
-                        # Apply human correction to position/orientation ONLY
-                        # Do NOT override gripper - robot needs to keep it closed during transport
-                        action[:6] += right_delta
-                        
-                        # Signal intervention for learning
-                        arm.signal_physical_intervention(obs, robot_action, action)
+                    # Apply human correction to position/orientation ONLY
+                    # Do NOT override gripper - robot needs to keep it closed during transport
+                    action[:6] += human_delta
+                    
+                    # Signal intervention for learning
+                    arm.signal_physical_intervention(obs, robot_action, action)
             
             # Update intervention state (handles cooldown and triggers learning)
             if use_physical_input:
@@ -291,9 +402,11 @@ def main():
             # Step environment
             obs, _, done, _ = world.step(action)
 
-            state = np.hstack([robot._joint_positions, robot._joint_velocities, [action[-1]]]) #TODO: Add gripper state somehow..            
-            sock.send(state.tobytes())             # blocking send
-            reply = sock.recv()                    # blocking recieve
+            # Send state to remote robot via ZMQ (if enabled)
+            if zmq_socket is not None:
+                state = np.hstack([robot._joint_positions, robot._joint_velocities, [action[-1]]])  # TODO: Add gripper state somehow..
+                zmq_socket.send(state.tobytes())  # blocking send
+                reply = zmq_socket.recv()  # blocking receive
             
             # Compute reward
             reward = arm.reward_fn(obs)
@@ -362,8 +475,21 @@ def main():
     
     finally:
         world.close()
+        if zmq_socket is not None:
+            zmq_socket.close()
 
 
 if __name__ == "__main__":
     main()
 
+# # Without ZMQ (default)
+# python visualize_experiment.py
+
+# # With ZMQ using defaults
+# python visualize_experiment.py --zmq
+
+# # With ZMQ custom address/port
+# python visualize_experiment.py --zmq --zmq-address 192.168.1.100 --zmq-port 5556
+
+# # Combined with spacemouse
+# python visualize_experiment.py --spacemouse --zmq --zmq-address 128.30.29.23

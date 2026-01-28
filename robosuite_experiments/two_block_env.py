@@ -23,7 +23,7 @@ class TwoBlockPickPlace(ManipulationEnv):
         self,
         robots,
         table_full_size=(0.91, 1.5, 0.05),
-        table_offset=(0, 0, 0.9),
+        table_offset=(0, 0, 0.95),
         **kwargs
     ):
         self.table_full_size = table_full_size
@@ -90,7 +90,7 @@ class TwoBlockPickPlace(ManipulationEnv):
             rotation=None,
             ensure_object_boundary_in_range=True,
             ensure_valid_placement=True,
-            reference_pos=self.table_offset + np.array([-0.2, -0.3, 0.02]),  # Zone A position
+            reference_pos=self.table_offset + np.array([-0.3, -0.3, 0.02]),  # Zone A position
             z_offset=0.1,
         )
         self.placement_initializer.append_sampler(red_sampler)
@@ -104,7 +104,7 @@ class TwoBlockPickPlace(ManipulationEnv):
             rotation=None,
             ensure_object_boundary_in_range=False,
             ensure_valid_placement=False,
-            reference_pos=self.table_offset + np.array([0.05, -0.05, 0.025]),  
+            reference_pos=self.table_offset + np.array([-0.02, 0.0, 0.025]),  
             z_offset=0.0,
         )
         self.placement_initializer.append_sampler(green_sampler)
@@ -115,7 +115,7 @@ class TwoBlockPickPlace(ManipulationEnv):
         # Zone A marker (red - where red block starts)
         zone_a_marker = new_site(
             name="zone_a_marker",
-            pos=np.array([-0.2, -0.3, 0.92]),  # Zone A position
+            pos=np.array([-0.3, -0.3, 0.97]),  # Zone A position
             rgba=(1, 0, 0, 0.3),  # Red, semi-transparent
             size=(0.05,)  # Larger marker
         )
@@ -124,7 +124,7 @@ class TwoBlockPickPlace(ManipulationEnv):
         # Zone B marker (green - target zone)
         zone_b_marker = new_site(
             name="zone_b_marker",
-            pos=np.array([0.2, 0.3, 0.92]),  # Zone B position
+            pos=np.array([0.1, 0.3, 0.97]),  # Zone B position
             rgba=(0, 1, 0, 0.3),  # Green, semi-transparent
             size=(0.05,)
         )
@@ -133,7 +133,7 @@ class TwoBlockPickPlace(ManipulationEnv):
         
         zone_c_marker = new_site(
             name="zone_c_marker",
-            pos=np.array([-0.15, 0.25, 0.92]),  # Zone C position
+            pos=np.array([-0.25, 0.15, 0.97]),  # Zone C position
             rgba=(0, 0, 1, 0.3),  # Blue, semi-transparent
             size=(0.05,)
         )

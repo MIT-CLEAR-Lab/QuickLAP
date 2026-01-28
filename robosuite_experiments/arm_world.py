@@ -74,9 +74,9 @@ class ArmWorld:
         )
         
         # Define zone positions for task
-        self.zone_a_pos = np.array([-0.2, -0.3, 0.92])  # Left side of table (red block spawns here)
-        self.zone_b_pos = np.array([0.2, 0.3, 0.92])    # Right side of table (target zone)
-        self.zone_c_pos = np.array([-0.15, 0.25, 0.92])  # Zone C (obstacle zone)
+        self.zone_a_pos = np.array([-0.3, -0.3, 0.97])  # Left side of table (red block spawns here)
+        self.zone_b_pos = np.array([0.1, 0.3, 0.97])    # Right side of table (target zone)
+        self.zone_c_pos = np.array([-0.25, 0.15, 0.97])  # Zone C (obstacle zone)
         
     def reset(self):
         """Reset the environment and return initial observation."""
