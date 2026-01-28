@@ -62,7 +62,7 @@ class UserStudyManager:
         # Check if LLM-based methods are needed for any experiments
         self.llm_needed = any(
             method in ["phri", "llm", "language", "test"]
-            for method, _ in experiment_sequence
+            for method in experiment_sequence
         )
         self.openai_api_key = None
         if self.llm_needed:
@@ -73,7 +73,7 @@ class UserStudyManager:
                 )
                 # Filter out LLM-based experiments
                 self.experiment_sequence = [
-                    (m, e) for m, e in experiment_sequence if m == "phri"
+                    m for m in experiment_sequence if m == "phri"
                 ]
 
         # Session data
@@ -107,9 +107,7 @@ class UserStudyManager:
         print("\n📋 Experiment Sequence:")
         print("=" * 80)
 
-        for i, (method, env_name) in enumerate(self.experiment_sequence):
-            env_config = self.environments[env_name]
-
+        for i, method in enumerate(self.experiment_sequence):
             method_name = self.METHOD_NAMES.get(method, method)
 
             if i < self.current_experiment_index:
