@@ -194,6 +194,9 @@ class RobosuiteAdaptGatedLLMPHRILearner(AdaptGatedLLMPHRILearner):
         self.audio_file_path = audio_file_path
         self.openai_api_key = openai_api_key
         self.method = method
+        
+        # Store last update data for logging
+        self.last_update_data = None
     
     def compute_features(self, trajectory: dict[str, list]) -> np.ndarray:
         """
@@ -345,6 +348,20 @@ class RobosuiteAdaptGatedLLMPHRILearner(AdaptGatedLLMPHRILearner):
             self.features_names,
             self.method,
         )
+        
+        # Store update data for external logging
+        self.last_update_data = {
+            "explanation": explanation,
+            "robot_features": robot_features.tolist(),
+            "human_features": human_features.tolist(),
+            "feature_diff": feature_diff.tolist(),
+            "gate": gate.tolist(),
+            "mu": mu.tolist(),
+            "confidence": confidence.tolist(),
+            "old_weights": self.car.weights.tolist(),
+            "new_weights": new_weights.tolist(),
+            "method": self.method,
+        }
         
         self.car.weights = new_weights
 

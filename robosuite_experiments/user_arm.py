@@ -84,6 +84,9 @@ class UserArm(BaseRationalArm):
             None  # Simulated robot state for counterfactual trajectory
         )
         self.dt = 0.05  # 20Hz control rate
+        
+        # Intervention logging for analysis
+        self.intervention_logs = []
 
         # Physical input intervention tracking
         self.physical_intervention_active = False
@@ -319,6 +322,14 @@ class UserArm(BaseRationalArm):
                     # Update weights via learner (computes feature diff over full trajectories)
                     self.learner.update_weights(robot_traj, human_traj)
                     print(f"Updated weights: {self.weights}")
+                    
+                    # Log intervention data
+                    if hasattr(self.learner, 'last_update_data') and self.learner.last_update_data:
+                        self.intervention_logs.append({
+                            "timestep": self.timestep,
+                            "audio_file": final_audio_path,
+                            **self.learner.last_update_data
+                        })
 
                 # Reset state
                 self.physical_intervention_active = False

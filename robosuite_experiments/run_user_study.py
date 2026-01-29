@@ -324,6 +324,7 @@ class UserStudyManager:
                 "weight_similarity": float(weight_similarity),
                 "step_data": step_data,
                 "car_step_data": arm.step_data if hasattr(arm, "step_data") else [],
+                "intervention_logs": arm.intervention_logs,
             }
 
             with open(os.path.join(exp_save_dir, "results.json"), "w") as f:
