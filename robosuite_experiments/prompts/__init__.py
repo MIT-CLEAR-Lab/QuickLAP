@@ -89,6 +89,7 @@ ADAPT_GATED_MU_CONFIDENCE_SYSTEM_PROMPT = (
     "CRITICAL: When the human's VERBAL EXPLANATION conflicts with the physical feature changes, ALWAYS prioritize the verbal explanation. "
     "For example, if the user says 'do X' but the feature for X contradicts the user's utterance during the intervention, "
     "you should follow the user's utterance.\n"
+    "REMEMBER: mu is ADDED to the current weight. If you want to INCREASE a weight, use POSITIVE mu. If you want to DECREASE a weight, use NEGATIVE mu. "
     "CRITICAL: 'mu' and 'confidence' must be ONLY NUMERIC VALUES. Each 'mu' value must be a NUMBER between -6 and 6. Each 'confidence' value must be a NUMBER between 0 and 1. "
     "DO NOT return feature names, strings, or any text in those arrays. ONLY numbers.\n\n"
     "Example JSON output for 3 features:\n"
