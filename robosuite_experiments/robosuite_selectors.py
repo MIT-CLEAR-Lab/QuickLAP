@@ -222,14 +222,10 @@ class RobosuiteMaskedLLMFeatureSelectorDPhi(RobosuiteMaskedLLMFeatureSelector):
         """
         for feature, value in human_feature_values.items():
             change = value - robot_feature_values[feature]
-            direction = (
-                "INCREASED"
-                if change > 0
-                else "DECREASED" if change < 0 else "UNCHANGED"
-            )
+ 
             prompt += (
                 f"- {feature} ({self.feature_descriptions[feature]}): "
-                f"Feature change: {change:.3f}, the human ({direction} this feature)\n"
+                f"Feature change: {change:.3f}\n"
             )
         prompt += REASON_GATE_PROMPT
         prompt += (
@@ -355,19 +351,11 @@ class RobosuiteAdaptGatedLLMFeatureSelector:
             if self.method != 3:
                 human_val = human_feature_values[feature]
                 change = human_val - value
-                direction = (
-                    "INCREASED"
-                    if change > 0
-                    else (
-                        "DECREASED"
-                        if change < 0
-                        else "MAY HAVE CHANGED" if np.isnan(change) else "DID NOT CHANGE"
-                    )
-                )
+
 
                 prompt += (
                     f"- {feature} ({self.feature_descriptions[feature]}): "
-                    f"feature change after intervention: {change:+.3f}, the human ({direction} this feature)\n"
+                    f"feature change after intervention: {change:+.3f}\n"
                 )
             else:
                 prompt += (
