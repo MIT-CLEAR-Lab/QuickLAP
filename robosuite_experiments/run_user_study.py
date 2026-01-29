@@ -371,11 +371,10 @@ class UserStudyManager:
         
     def run_demo(self, oracle_weights=DEFAULT_ORACLE_WEIGHTS) -> bool:
         """
-        Run a specific experiment with given method and environment.
+        Run a demo with given weights (no learning).
 
         Args:
-            method: Learning method ("phri" or "llm")
-            env_name: Environment name
+            oracle_weights: Weights to use for the demo
 
         Returns:
             bool: True if successful, False otherwise
@@ -383,9 +382,6 @@ class UserStudyManager:
 
         try:
             start_time = time.time()
-
-            # Show optimal behavior demonstration (skip for test method)
-            input("Press Enter to start the test experiment...")
 
             # Now setup actual experiment world
             world = ArmWorld(
@@ -504,9 +500,10 @@ class UserStudyManager:
             # Display the full sequence at the start
             self.display_experiment_sequence()
 
-            print(f"\nDemo phase")
+            print(f"\nDemo phase (free exploration with zero weights)")
             free_demo_weights = np.zeros(7)
             while True:
+                input("Press Enter to start the free demo...")
                 self.run_demo(oracle_weights=free_demo_weights)
                 repeat = input("\nRepeat demo? (y/n): ").strip().lower()
                 if repeat != "y":
@@ -642,3 +639,31 @@ def main(experiment_sequence=None):
 
 if __name__ == "__main__":
     main()
+
+# python robosuite_experiments/run_user_study.py
+
+# user_study/
+# └── sessions/
+#     └── {participant_id}_{timestamp}/           # e.g., "1_20260129_143022"
+#         │
+#         ├── session_info.json                   # Overall session metadata
+#         │
+#         ├── phri/                               # One folder per method in sequence
+#         │   ├── experiment_config.json          # Initial config (method, weights, etc.)
+#         │   ├── results.json                    # Final results (weights, step_data, etc.)
+#         │   ├── learning_log.txt                # PHRI learning updates
+#         │   └── error.json                      # Only if experiment failed
+#         │
+#         ├── llm/
+#         │   ├── experiment_config.json
+#         │   ├── results.json
+#         │   ├── intervention_{timestep}_{ms}.wav    # Audio recordings (one per intervention)
+#         │   ├── intervention_{timestep}_{ms}.txt    # Transcribed text
+#         │   └── error.json                          # Only if failed
+#         │
+#         └── language/
+#             ├── experiment_config.json
+#             ├── results.json
+#             ├── intervention_{timestep}_{ms}.wav
+#             ├── intervention_{timestep}_{ms}.txt
+#             └── error.json
