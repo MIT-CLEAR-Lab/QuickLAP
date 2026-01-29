@@ -66,6 +66,8 @@ class UserArm(BaseRationalArm):
         self.use_audio = use_audio
         self.audio_save_dir = audio_save_dir
         self.audio_recording = False
+        self.audio_recorder = None
+        self.current_audio_path = None
         if AUDIO_AVAILABLE:
             self.audio_recorder = AudioRecorder()
             print("Audio recording enabled")
@@ -280,12 +282,15 @@ class UserArm(BaseRationalArm):
                 ):
                     time.sleep(0.1)
 
-                # Update the learner with the audio file path
+                # Update the learner with the audio file path (if learner supports it)
                 if final_audio_path and os.path.exists(final_audio_path) and self.learner:
-                    self.learner.set_audio_file_path(final_audio_path)
-                    print(
-                        f"Processing intervention with speech input from: {final_audio_path}"
-                    )
+                    if hasattr(self.learner, 'set_audio_file_path'):
+                        self.learner.set_audio_file_path(final_audio_path)
+                        print(
+                            f"Processing intervention with speech input from: {final_audio_path}"
+                        )
+                    else:
+                        print("Learner does not support audio input")
                 else:
                     print("No audio file available, using default explanation")
 
@@ -756,12 +761,15 @@ class UserArm(BaseRationalArm):
                 ):
                     time.sleep(0.1)
 
-                # Update the learner with the audio file path
+                # Update the learner with the audio file path (if learner supports it)
                 if final_audio_path and os.path.exists(final_audio_path):
-                    self.learner.set_audio_file_path(final_audio_path)
-                    print(
-                        f"Processing intervention with speech input from: {final_audio_path}"
-                    )
+                    if hasattr(self.learner, 'set_audio_file_path'):
+                        self.learner.set_audio_file_path(final_audio_path)
+                        print(
+                            f"Processing intervention with speech input from: {final_audio_path}"
+                        )
+                    else:
+                        print("Learner does not support audio input")
                 else:
                     print("No audio file available, using default explanation")
                 # Update weights via learner

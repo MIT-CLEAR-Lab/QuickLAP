@@ -22,6 +22,7 @@ from arm_feature_utils import DEFAULT_BASE_WEIGHTS, DEFAULT_ORACLE_WEIGHTS
 from franka_spacemouse import SpaceMouseInput
 from user_arm import UserArm
 from robosuite_learners import RobosuiteAdaptGatedLLMPHRILearner
+from robosuite_phri_learner import RobosuitePHRILearner
 
 import zmq
 
@@ -80,21 +81,17 @@ class UserStudyManager:
         self.current_experiment_index = 0
 
         # Check if LLM-based methods are needed for any experiments
+        # Note: "phri" does NOT need LLM - it's pure physical correction
         self.llm_needed = any(
-            method in ["phri", "llm", "language", "test"]
+            method in ["llm", "language", "test"]
             for method in experiment_sequence
         )
-        self.openai_api_key = None
-        if self.llm_needed:
-            self.openai_api_key = os.getenv("OPENAI_API_KEY")
-            if not self.openai_api_key:
-                print(
-                    "Warning: No OpenAI API key found. LLM, Language, and Test experiments will be skipped."
-                )
-                # Filter out LLM-based experiments
-                self.experiment_sequence = [
-                    m for m in experiment_sequence if m == "phri"
-                ]
+        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        if self.llm_needed and not self.openai_api_key:
+            raise ValueError(
+                "OpenAI API key required for LLM-based experiments (llm, language, test). "
+                "Set OPENAI_API_KEY environment variable."
+            )
 
         # Session data
         self.session_data = {
@@ -177,6 +174,8 @@ class UserStudyManager:
                 horizon=1200,
                 seed=42,
             )
+            # Only enable audio for LLM-based methods (not needed for pure PHRI)
+            needs_audio = method in ["llm", "language"]
             arm = UserArm(
                 world=world,
                 learner=None,
@@ -184,15 +183,27 @@ class UserStudyManager:
                 seed=42,
                 planner_horizon=8,  # Short horizon for speed
                 planner_n_iter=20,  # More iterations needed when starting from zero
+                use_audio=needs_audio,
+                audio_save_dir=exp_save_dir if needs_audio else None,
             )
-            arm.learner = RobosuiteAdaptGatedLLMPHRILearner(
-                arm,
-                "",
-                arm.get_feature_descriptions(),
-                openai_api_key=self.openai_api_key,
-                use_speech_input=True,
-                audio_file_path=None,
-            )
+            # Use different learner based on method
+            if method == "phri":
+                # Pure PHRI baseline - no LLM, no audio
+                arm.learner = RobosuitePHRILearner(
+                    arm,
+                    log_file=os.path.join(exp_save_dir, "learning_log.txt"),
+                )
+            else:
+                # LLM-based methods (llm, language)
+                arm.learner = RobosuiteAdaptGatedLLMPHRILearner(
+                    arm,
+                    "",
+                    arm.get_feature_descriptions(),
+                    openai_api_key=self.openai_api_key,
+                    use_speech_input=True,
+                    audio_file_path=None,
+                    method=self.METHODS[method],
+                )
             robot = world.env.robots[0]
 
             # Save experiment configuration
@@ -358,7 +369,7 @@ class UserStudyManager:
         finally:
             world.close()
         
-    def run_demo(self) -> bool:
+    def run_demo(self, oracle_weights=DEFAULT_ORACLE_WEIGHTS) -> bool:
         """
         Run a specific experiment with given method and environment.
 
@@ -388,7 +399,7 @@ class UserStudyManager:
             arm = UserArm(
                 world=world,
                 learner=None,
-                base_weights=DEFAULT_ORACLE_WEIGHTS.copy(),
+                base_weights=oracle_weights.copy(),
                 seed=42,
                 planner_horizon=8,  # Short horizon for speed
                 planner_n_iter=20,  # More iterations needed when starting from zero
@@ -494,14 +505,25 @@ class UserStudyManager:
             self.display_experiment_sequence()
 
             print(f"\nDemo phase")
-
-            self.run_demo()
+            free_demo_weights = np.zeros(7)
+            while True:
+                self.run_demo(oracle_weights=free_demo_weights)
+                repeat = input("\nRepeat demo? (y/n): ").strip().lower()
+                if repeat != "y":
+                    break
 
             print(f"\n🎯 Ready to start {len(self.experiment_sequence)} experiments")
             input("Press Enter to begin the first experiment...")
 
             # Run each experiment in sequence
             while self.current_experiment_index < len(self.experiment_sequence):
+
+                input("Press Enter to see the optimal behavior...")
+
+                self.run_demo(oracle_weights=DEFAULT_ORACLE_WEIGHTS)
+
+                input("Press Enter to continue to the next method...")
+
                 method = self.experiment_sequence[self.current_experiment_index]
 
                 # Display current experiment info
@@ -510,17 +532,8 @@ class UserStudyManager:
                 print(
                     f"EXPERIMENT {self.current_experiment_index + 1}/{len(self.experiment_sequence)}"
                 )
-                print(f"Method: {method_display}")
+                # print(f"Method: {method_display}")
                 print(f"{'='*80}")
-
-                # Skip LLM-based experiments if no API key
-                if (
-                    method in ["phri", "llm", "language", "test"]
-                    and not self.openai_api_key
-                ):
-                    print(f"⏭️  Skipping {method} experiment (no API key)")
-                    self.current_experiment_index += 1
-                    continue
 
                 try:
                     success = self.run_experiment(method)
