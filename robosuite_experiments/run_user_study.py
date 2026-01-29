@@ -166,7 +166,7 @@ class UserStudyManager:
             start_time = time.time()
 
             # Show optimal behavior demonstration (skip for test method)
-            input("Press Enter to start the test experiment...")
+            input("Press Enter to start the experiment...")
 
             # Now setup actual experiment world
             world = ArmWorld(
@@ -357,6 +357,102 @@ class UserStudyManager:
             return False
         finally:
             world.close()
+        
+    def run_demo(self) -> bool:
+        """
+        Run a specific experiment with given method and environment.
+
+        Args:
+            method: Learning method ("phri" or "llm")
+            env_name: Environment name
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+
+        try:
+            start_time = time.time()
+
+            # Show optimal behavior demonstration (skip for test method)
+            input("Press Enter to start the test experiment...")
+
+            # Now setup actual experiment world
+            world = ArmWorld(
+                has_renderer=True,  # Enable visualization
+                has_offscreen_renderer=False,
+                use_camera_obs=False,
+                control_freq=20,
+                horizon=1200,
+                seed=42,
+            )
+            arm = UserArm(
+                world=world,
+                learner=None,
+                base_weights=DEFAULT_EXPERT_WEIGHTS.copy(),
+                seed=42,
+                planner_horizon=8,  # Short horizon for speed
+                planner_n_iter=20,  # More iterations needed when starting from zero
+            )
+            robot = world.env.robots[0]
+
+            obs = world.get_observation()
+            for t in range(world.horizon):
+                step_start_time = time.time()
+                robot_action = arm.get_action(obs)
+                action = robot_action.copy()
+
+                state = np.hstack(
+                    [robot._joint_positions, robot._joint_velocities, [0]]
+                )  # TODO: Add gripper state somehow...
+                self.sock.send(state.tobytes())  # blocking send
+                reply = self.sock.recv()
+
+                if t >= 10:
+                    # Get human input from keyboard device
+                    # Returns dict with 'right_delta' (6,) and 'right_gripper' keys
+                    device_action = self.mouse.get_input()
+
+                    if device_action is not None:
+                        # Check if human is actively providing input (position/orientation only)
+                        # Use higher thresholds to avoid false positives from device noise
+                        # NOTE: We ignore gripper input during transport - robot must keep holding the block
+                        delta_magnitude = np.linalg.norm(device_action[:6])
+                        if delta_magnitude > 0.01:
+                            # Apply human correction to position/orientation ONLY
+                            # Do NOT override gripper - robot needs to keep it closed during transport
+                            action[:6] += device_action[:6]
+
+                            # Signal intervention for learning
+                            arm.signal_physical_intervention(obs, robot_action, action)
+                # Update intervention state (handles cooldown and triggers learning)
+                arm.update_physical_intervention_state()
+
+                # Step environment
+                obs, _, done, _ = world.step(action)
+
+                world.render()
+
+                if t % 50 == 0:
+                    progress = (t / world.horizon) * 100
+                    print(f"Progress: {progress:.1f}% ({t}/{world.horizon} steps)")
+
+                # Maintain frame rate
+                step_duration = time.time() - step_start_time
+                time.sleep(max(0, 1.0 / 30 - step_duration))
+
+            end_time = time.time()
+            duration = end_time - start_time
+
+            print(f"\nDemo Environment completed successfully!")
+            print(f"Duration: {duration:.1f} seconds")
+            print("X" * 60)
+            return True
+        except Exception as e:
+            print(f"\n❌ Error during environment execution: {e}")
+            traceback.print_exc()
+            return False
+        finally:
+            world.close()
 
     def save_session_info(self):
         """Save current session information."""
@@ -396,6 +492,10 @@ class UserStudyManager:
         try:
             # Display the full sequence at the start
             self.display_experiment_sequence()
+
+            print(f"\nDemo phase")
+
+            self.run_demo()
 
             print(f"\n🎯 Ready to start {len(self.experiment_sequence)} experiments")
             input("Press Enter to begin the first experiment...")

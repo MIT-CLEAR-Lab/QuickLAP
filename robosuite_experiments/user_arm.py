@@ -281,14 +281,14 @@ class UserArm(BaseRationalArm):
                     time.sleep(0.1)
 
                 # Update the learner with the audio file path
-                if final_audio_path and os.path.exists(final_audio_path):
+                if final_audio_path and os.path.exists(final_audio_path) and self.learner:
                     self.learner.set_audio_file_path(final_audio_path)
                     print(
                         f"Processing intervention with speech input from: {final_audio_path}"
                     )
                 else:
                     print("No audio file available, using default explanation")
-                    
+
                 if len(self.robot_trajectory) > 0 and self.learner is not None:
                     # Convert to format expected by learner
                     # Full trajectories for feature computation
