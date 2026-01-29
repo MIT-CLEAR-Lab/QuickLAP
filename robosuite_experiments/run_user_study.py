@@ -157,11 +157,6 @@ class UserStudyManager:
             bool: True if successful, False otherwise
         """
 
-        method_name = self.METHOD_NAMES.get(method, method)
-
-        print(f"Method: {method_name}")
-        print("=" * 60)
-
         # Create experiment-specific save directory
         experiment_name = f"{method}"
         exp_save_dir = os.path.join(self.save_dir, experiment_name)
@@ -219,18 +214,14 @@ class UserStudyManager:
             obs = world.get_observation()
             for t in range(world.horizon):
                 step_start_time = time.time()
-                print(f"t={t}")
                 robot_action = arm.get_action(obs)
                 action = robot_action.copy()
 
                 state = np.hstack(
                     [robot._joint_positions, robot._joint_velocities, [0]]
                 )  # TODO: Add gripper state somehow...
-                print(f"Sending state {state}")
                 self.sock.send(state.tobytes())  # blocking send
-                print("Sent")
                 reply = self.sock.recv()
-                print("Got reply")
 
                 # Add keyboard input if enabled (using robosuite's built-in device)
                 # Only allow physical input during TRANSPORT/MOVE phase (when human guidance matters)
@@ -325,7 +316,7 @@ class UserStudyManager:
             }
 
             with open(os.path.join(exp_save_dir, "results.json"), "w") as f:
-                print(results_data)
+                # print(results_data)
                 json.dump(results_data, f, indent=2, default=str)
 
             # Update session data
@@ -364,6 +355,8 @@ class UserStudyManager:
                 json.dump(error_data, f, indent=2)
 
             return False
+        finally:
+            world.close()
 
     def save_session_info(self):
         """Save current session information."""
@@ -387,7 +380,7 @@ class UserStudyManager:
                 exp_completion["method"], f"❓ {exp_completion['method']}"
             )
             print(
-                f"  ✅ {method_name:17} | {exp_completion['environment']:20} | {exp_completion['duration']:6.1f}s"
+                f"  ✅ {method_name:17} | {exp_completion['duration']:6.1f}s"
             )
 
         remaining_count = len(self.experiment_sequence) - len(

@@ -6,6 +6,8 @@ MPC controls HOW to move (optimizing based on learned preferences)
 """
 
 import copy
+import time
+import os
 import numpy as np
 from base_rational_arm import BaseRationalArm
 from arm_world import ArmWorld
@@ -64,6 +66,12 @@ class UserArm(BaseRationalArm):
         self.use_audio = use_audio
         self.audio_save_dir = audio_save_dir
         self.audio_recording = False
+        if AUDIO_AVAILABLE:
+            self.audio_recorder = AudioRecorder()
+            print("Audio recording enabled")
+        else:
+            print("Audio recording disabled - missing dependencies")
+            print("Install with: pip install sounddevice scipy")
 
         # Tracking variables
         self.timestep = 0
@@ -141,6 +149,8 @@ class UserArm(BaseRationalArm):
             # Start new intervention
             self.physical_intervention_active = True
             self.recording = True
+
+            self.start_audio_recording()
             self.robot_trajectory = []
             self.human_trajectory = []
             # Initialize simulated robot state from current observation
@@ -194,7 +204,7 @@ class UserArm(BaseRationalArm):
                 # Generate unique filename for this recording
                 timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
                 if self.audio_save_dir:
-                    audio_filename = f"intervention_{self.time_step}_{timestamp}.wav"
+                    audio_filename = f"intervention_{self.timestep}_{timestamp}.wav"
                     self.current_audio_path = os.path.join(
                         self.audio_save_dir, audio_filename
                     )
@@ -203,7 +213,7 @@ class UserArm(BaseRationalArm):
 
                 self.audio_recording = True
                 print(
-                    f"Started audio recording for intervention at timestep {self.time_step}"
+                    f"Started audio recording for intervention at timestep {self.timestep}"
                 )
                 print("Please explain your intervention while driving...")
 
@@ -243,7 +253,7 @@ class UserArm(BaseRationalArm):
 
         return self.current_audio_path
 
-    def update_physical_intervention_state(self, utterance=None):
+    def update_physical_intervention_state(self):
         """
         Update physical intervention state each timestep.
 
@@ -260,8 +270,25 @@ class UserArm(BaseRationalArm):
                 print(
                     f"  Recorded {len(self.robot_trajectory)} timesteps of intervention"
                 )
-                print(f"  Utterance: '{utterance}'")
+                final_audio_path = self.stop_audio_recording()
 
+                # Wait a bit for the audio recording to complete
+                max_wait_time = 5.0  # seconds
+                wait_start = time.time()
+                while (
+                    self.audio_recording and (time.time() - wait_start) < max_wait_time
+                ):
+                    time.sleep(0.1)
+
+                # Update the learner with the audio file path
+                if final_audio_path and os.path.exists(final_audio_path):
+                    self.learner.set_audio_file_path(final_audio_path)
+                    print(
+                        f"Processing intervention with speech input from: {final_audio_path}"
+                    )
+                else:
+                    print("No audio file available, using default explanation")
+                    
                 if len(self.robot_trajectory) > 0 and self.learner is not None:
                     # Convert to format expected by learner
                     # Full trajectories for feature computation

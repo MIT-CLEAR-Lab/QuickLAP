@@ -230,6 +230,7 @@ class RobosuiteAdaptGatedLLMPHRILearner(AdaptGatedLLMPHRILearner):
             with open(f"{self.audio_file_path[:-4]}.txt", "a") as explanation_file:
                 explanation_file.write(explanation + "\n")
         else:
+            print("Warning: no speech input or no audio file path")
             explanation = self.explanation
 
         # Extract features (now returns numpy arrays)
