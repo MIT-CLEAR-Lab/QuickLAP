@@ -29,6 +29,16 @@ FEATURE_NAMES = [
     "block_to_zone", "zone_c_clearance", "height_maintain"
 ]
 
+DEFAULT_ORACLE_WEIGHTS = np.array([
+    8.0,   # green_clearance: strongly avoid green block (positive = stay far)
+    1.0,    # velocity: move at good speed
+    2.0,    # collision: stay safe (but constant at large distances)
+    1.0,    # joints: stay away from joint limits
+    25.0,   # block_to_zone: move block toward target (main objective)
+    0.0,    # zone_c_clearance: avoid obstacle zone C
+    0.5,    # height_maintain: maintain transport height
+], dtype=np.float32)
+
 # Default base weights for robot (before learning)
 DEFAULT_BASE_WEIGHTS = np.array([
     0.0,    # green_clearance: avoid green block (positive = stay far)
@@ -394,7 +404,7 @@ def get_feature_descriptions(include_red_dist=False, include_zones=False):
     descriptions.update({
         "green_clearance": "Clearance from the green block (obstacle). HIGHER values mean FARTHER from the obstacle. Increasing this weight makes the robot stay farther away; decreasing it makes the robot get closer.",
         "velocity": "Speed of end effector movement. Higher values mean faster motion. Increasing this weight makes the robot move faster.",
-        "collision_safety": "Safety penalty for getting too close to obstacles (green block). Higher values mean more conservative collision avoidance.",
+        "collision_safety": "Safety penalty for getting too close to obstacles. Higher values mean more conservative collision avoidance.",
         "joint_safety": "Safety penalty for joint configurations near limits. Higher values mean more conservative joint movements.",
     })
     

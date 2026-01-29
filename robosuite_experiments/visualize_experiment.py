@@ -45,6 +45,7 @@ from arm_feature_utils import (
     DEFAULT_BASE_WEIGHTS,
     DEFAULT_EXPERT_WEIGHTS,
     FEATURE_NAMES,
+    DEFAULT_ORACLE_WEIGHTS,
 )
 
 # Robosuite's built-in keyboard device
@@ -131,8 +132,6 @@ def _rotation_matrix_from_direction(direction):
     rot = np.column_stack([x_axis, y_axis, direction])
     return rot
 
-t = 0
-mouse = SpaceMouseInput(sensitivity=.003)
 
 def main():
     """Run experiment with hierarchical MPC and visualization."""
@@ -250,7 +249,8 @@ def main():
     
     # Use centralized default weights from arm_feature_utils
     # 7 features: [green_clearance, velocity, collision, joints, block_to_zone, zone_c_clearance, height_maintain]
-    base_weights = DEFAULT_BASE_WEIGHTS.copy()
+    # base_weights = DEFAULT_BASE_WEIGHTS.copy()
+    base_weights = DEFAULT_ORACLE_WEIGHTS.copy()
     
     # When using physical input, human IS the expert (no simulated expert weights)
     if use_physical_input:
@@ -277,8 +277,8 @@ def main():
         learner=None,  # Will set after creation
         utterance=utterance,
         expert_weights=expert_weights,
-        intervention_interval=(780, 800),  # Disable simulated intervention
-        # intervention_interval=(99999, 99999),  # Disable simulated intervention
+        # intervention_interval=(780, 800),  # Disable simulated intervention
+        intervention_interval=(99999, 99999),  # Disable simulated intervention
         base_weights=base_weights,
         seed=42,
         planner_horizon=8,   # Short horizon for speed
@@ -404,13 +404,6 @@ def main():
             # Step environment
             obs, _, done, _ = world.step(action)
 
-
-            t+= 1
-            if t > 25:
-                state = np.hstack([robot._joint_positions, robot._joint_velocities, [action[-1]]]) #TODO: Add gripper state somehow..            
-                sock.send(state.tobytes())             # blocking send
-                reply = sock.recv()                    # blocking recieve
-                t=0
             # Send state to remote robot via ZMQ (if enabled)
             if zmq_socket is not None:
                 state = np.hstack([robot._joint_positions, robot._joint_velocities, [action[-1]]])  # TODO: Add gripper state somehow..

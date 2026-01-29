@@ -8,3 +8,4 @@ results/
 .venv
 user_study/
 participants.csv
+visualize_mse_grouped.py

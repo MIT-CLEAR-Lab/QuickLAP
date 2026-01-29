@@ -34,7 +34,7 @@ dotenv.load_dotenv()
 # [green_clearance, velocity, collision, joints, block_to_zone, zone_c_clearance, height_maintain]
 # Note: clearance features use POSITIVE weights (higher = stay farther = safer)
 ORACLE_WEIGHTS = {
-    "pick_place": np.array([8.0, 1.0, 2.0, 1.0, 25.0, 2.0, 0.0]),
+    "pick_place": np.array([10.0, 1.0, 2.0, 1.0, 25.0, 2.0, 0.0]),
 }
 
 # Parse command line arguments
@@ -79,12 +79,12 @@ EXPERIMENTS = {
 
 # Define utterances to test
 UTTERANCES = [
-    ("Avoid the obstacle.", "Avoid_obstacle"),
-    ("Steer clear of the green block.", "Steer_clear_block"),
-    ("Move away!!", "Move_away"),
-    ("AHH!", "AHH"),
-    ("Go left", "Go_left"),
-    ("Get away", "Get_away"),
+    # ("Avoid the obstacle.", "Avoid_obstacle"),
+    ("Steer clear of there.", "Steer_clear"),
+    # ("Move away!!", "Move_away"),
+    # ("AHH!", "AHH"),
+    # ("Go left", "Go_left"),
+    # ("Get away", "Get_away"),
 ]
 
 # Define learner factories (using robosuite-compatible versions)

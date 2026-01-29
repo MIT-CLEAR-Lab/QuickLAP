@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 
 from arm_world import ArmWorld
-from arm_feature_utils import DEFAULT_BASE_WEIGHTS, DEFAULT_EXPERT_WEIGHTS
+from arm_feature_utils import DEFAULT_BASE_WEIGHTS, DEFAULT_ORACLE_WEIGHTS
 from franka_spacemouse import SpaceMouseInput
 from user_arm import UserArm
 from robosuite_learners import RobosuiteAdaptGatedLLMPHRILearner
@@ -199,7 +199,7 @@ class UserStudyManager:
             exp_config_data = {
                 "method": method,
                 "timestamp": datetime.now().isoformat(),
-                "optimal_weights": DEFAULT_EXPERT_WEIGHTS.tolist(),
+                "optimal_weights": DEFAULT_ORACLE_WEIGHTS.tolist(),
                 "initial_weights": arm.weights.tolist(),
                 "initial_observation": serialize(world.get_observation()),
                 "learner_type": method,
@@ -297,8 +297,8 @@ class UserStudyManager:
             duration = end_time - start_time
 
             # Calculate weight similarity to optimal
-            weight_similarity = np.dot(arm.weights, DEFAULT_EXPERT_WEIGHTS) / (
-                np.linalg.norm(arm.weights) * np.linalg.norm(DEFAULT_EXPERT_WEIGHTS)
+            weight_similarity = np.dot(arm.weights, DEFAULT_ORACLE_WEIGHTS) / (
+                np.linalg.norm(arm.weights) * np.linalg.norm(DEFAULT_ORACLE_WEIGHTS)
             )
 
             # Save results
@@ -309,7 +309,7 @@ class UserStudyManager:
                 "duration": duration,
                 "completed": True,
                 "final_weights": arm.weights.tolist(),
-                "optimal_weights": DEFAULT_EXPERT_WEIGHTS.tolist(),
+                "optimal_weights": DEFAULT_ORACLE_WEIGHTS.tolist(),
                 "weight_similarity": float(weight_similarity),
                 "step_data": step_data,
                 "car_step_data": arm.step_data if hasattr(arm, "step_data") else [],
@@ -388,7 +388,7 @@ class UserStudyManager:
             arm = UserArm(
                 world=world,
                 learner=None,
-                base_weights=DEFAULT_EXPERT_WEIGHTS.copy(),
+                base_weights=DEFAULT_ORACLE_WEIGHTS.copy(),
                 seed=42,
                 planner_horizon=8,  # Short horizon for speed
                 planner_n_iter=20,  # More iterations needed when starting from zero
