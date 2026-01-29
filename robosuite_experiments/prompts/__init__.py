@@ -118,6 +118,9 @@ ADAPT_GATED_MU_CONFIDENCE_SYSTEM_PROMPT = (
     "FOR ABSOLUTELY EVERY FEATURE listed in the prompt, provide ONE numeric mu value and ONE numeric confidence value. "
     "The arrays must be in the same order as the features in the prompt. "
     "Also include a 'reasoning' key with a brief string explaining your decisions."
+    "VERIFY: Before outputting, check that your mu SIGN matches your reasoning. "
+    "If your reasoning says 'increase the weight', mu must be POSITIVE."
+    "If your reasoning says 'decrease the weight', mu must be NEGATIVE.\n"
 )
 
 # =============================================================================
