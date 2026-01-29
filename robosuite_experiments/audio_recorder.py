@@ -38,6 +38,89 @@ class AudioRecorder:
 
         self.sample_rate = sample_rate
         self.channels = channels
+        self.stop_requested = False
+    
+    def request_stop(self):
+        """Request the recording to stop."""
+        self.stop_requested = True
+    
+    def record_until_stopped(
+        self,
+        output_path: Optional[str] = None,
+        max_duration: float = 60.0,
+        device: Optional[str] = None,
+        warmup: float = 0.4,
+        debug: bool = False,
+    ) -> str:
+        """
+        Record audio until stop_requested is set or max_duration is reached.
+        
+        Args:
+            output_path: Path to save audio file. If None, creates temp file.
+            max_duration: Maximum recording duration in seconds
+            device: Audio input device
+            warmup: Seconds to discard at start
+            debug: Print debug info
+            
+        Returns:
+            Path to the saved audio file
+        """
+        self.stop_requested = False
+        
+        if output_path is None:
+            fd, output_path = tempfile.mkstemp(suffix=".wav", prefix="audio_")
+            os.close(fd)
+
+        dtype = "float32"
+        chunk_duration = 0.1  # 100 ms
+        frames_per_chunk = int(self.sample_rate * chunk_duration)
+
+        if debug:
+            print(f"Recording until stopped (max {max_duration}s)...")
+        print("Speak now! (recording will stop after physical input ends + pause)")
+
+        blocks = []
+        t0 = time.time()
+
+        with sd.InputStream(
+            samplerate=self.sample_rate,
+            channels=self.channels,
+            dtype=dtype,
+            device=device,
+        ) as stream:
+            # Warm up: discard initial frames
+            warm_frames = int(self.sample_rate * warmup)
+            if warm_frames > 0:
+                _discard, _ = stream.read(warm_frames)
+
+            while True:
+                data, _ = stream.read(frames_per_chunk)
+                blocks.append(data)
+                
+                elapsed = time.time() - t0
+                
+                # Check stop conditions
+                if self.stop_requested:
+                    if debug:
+                        print(f"Stop requested after {elapsed:.1f}s")
+                    break
+                    
+                if elapsed >= max_duration:
+                    if debug:
+                        print(f"Reached max duration {max_duration}s")
+                    break
+
+        if blocks:
+            audio = np.concatenate(blocks, axis=0)
+            # Save as int16 WAV
+            audio_i16 = np.clip(audio, -1, 1)
+            audio_i16 = (audio_i16 * 32767.0).astype(np.int16)
+            write(output_path, self.sample_rate, audio_i16)
+            print(f"Recording saved to: {output_path}")
+        else:
+            print("No audio captured")
+
+        return output_path
 
     def record_for_duration(
         self, duration: float, output_path: Optional[str] = None

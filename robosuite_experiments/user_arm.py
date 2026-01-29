@@ -89,7 +89,7 @@ class UserArm(BaseRationalArm):
         self.physical_intervention_active = False
         self.physical_intervention_cooldown = 0  # Timesteps since last input
         self.cooldown_threshold = (
-            30  # End intervention after N frames of no input (1.5 sec at 20Hz)
+            10  # End intervention after N frames of no input (0.5 sec at 20Hz)
         )
         self.physical_robot_sim_state = None  # Simulated robot state for counterfactual
 
@@ -219,17 +219,15 @@ class UserArm(BaseRationalArm):
                 )
                 print("Please explain your intervention while driving...")
 
-                # Start recording with silence detection in a background thread
+                # Start recording in a background thread (will stop when requested)
                 import threading
 
                 def record_audio():
                     try:
                         self.current_audio_path = (
-                            self.audio_recorder.record_with_silence_detection(
+                            self.audio_recorder.record_until_stopped(
                                 output_path=self.current_audio_path,
-                                silence_threshold=0.008,
-                                silence_duration=1.5,  # Stop after 1.5s of silence
-                                max_duration=10.0,  # Max 10 seconds
+                                max_duration=60.0,  # Max 60 seconds (safety limit)
                                 debug=False,
                             )
                         )
@@ -272,15 +270,27 @@ class UserArm(BaseRationalArm):
                 print(
                     f"  Recorded {len(self.robot_trajectory)} timesteps of intervention"
                 )
-                final_audio_path = self.stop_audio_recording()
-
-                # Wait a bit for the audio recording to complete
-                max_wait_time = 5.0  # seconds
+                
+                # Wait 4 seconds for any remaining speech after physical input ends
+                speech_wait_time = 4.0
+                print(f"  Waiting {speech_wait_time}s for speech input...")
+                time.sleep(speech_wait_time)
+                
+                # Stop the audio recording
+                if self.audio_recorder:
+                    self.audio_recorder.request_stop()
+                
+                # Wait briefly for the recording thread to finish saving
+                max_wait_time = 2.0
                 wait_start = time.time()
                 while (
                     self.audio_recording and (time.time() - wait_start) < max_wait_time
                 ):
                     time.sleep(0.1)
+                
+                # Get the audio path AFTER recording completes
+                final_audio_path = self.current_audio_path
+                self.audio_recording = False  # Ensure flag is reset
 
                 # Update the learner with the audio file path (if learner supports it)
                 if final_audio_path and os.path.exists(final_audio_path) and self.learner:
@@ -292,7 +302,7 @@ class UserArm(BaseRationalArm):
                     else:
                         print("Learner does not support audio input")
                 else:
-                    print("No audio file available, using default explanation")
+                    print(f"No audio file available (path={final_audio_path}), using default explanation")
 
                 if len(self.robot_trajectory) > 0 and self.learner is not None:
                     # Convert to format expected by learner
@@ -751,15 +761,27 @@ class UserArm(BaseRationalArm):
                     "state": [step["obs"] for step in self.human_trajectory],
                     "control": [step["control"] for step in self.human_trajectory],
                 }
-                final_audio_path = self.stop_audio_recording()
-
-                # Wait a bit for the audio recording to complete
-                max_wait_time = 5.0  # seconds
+                
+                # Wait 4 seconds for any remaining speech
+                speech_wait_time = 4.0
+                print(f"  Waiting {speech_wait_time}s for speech input...")
+                time.sleep(speech_wait_time)
+                
+                # Stop the audio recording
+                if self.audio_recorder:
+                    self.audio_recorder.request_stop()
+                
+                # Wait briefly for the recording thread to finish saving
+                max_wait_time = 2.0
                 wait_start = time.time()
                 while (
                     self.audio_recording and (time.time() - wait_start) < max_wait_time
                 ):
                     time.sleep(0.1)
+
+                # Get the audio path AFTER recording completes
+                final_audio_path = self.current_audio_path
+                self.audio_recording = False  # Ensure flag is reset
 
                 # Update the learner with the audio file path (if learner supports it)
                 if final_audio_path and os.path.exists(final_audio_path):
@@ -771,7 +793,7 @@ class UserArm(BaseRationalArm):
                     else:
                         print("Learner does not support audio input")
                 else:
-                    print("No audio file available, using default explanation")
+                    print(f"No audio file available (path={final_audio_path}), using default explanation")
                 # Update weights via learner
                 if self.learner is not None:
                     self.learner.update_weights(robot_traj, human_traj)
