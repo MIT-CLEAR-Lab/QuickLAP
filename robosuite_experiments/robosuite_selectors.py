@@ -43,16 +43,24 @@ Note: The user does not need to explicitly state their intent, it can be implici
 IMPORTANT: Even if a feature changed significantly, if it was a side effect (not the human's stated intent), it should get gate = 0.0.\n
 Similarly, even if a feature changed slightly, if it was the human's intent (implicit or explicit), it should get gate = 1.0.
 """
+# WEIGHT_UPDATE_PROMPT = {
+#     "green_clearance": "Increasing this weight makes the robot stay farther from the green block.",
+#     "velocity": "Increasing this weight makes the robot move faster.",
+#     "collision_safety": "Increasing this weight makes the robot stay farther from obstacles.",
+#     "joint_safety": "Increasing this weight makes the robot stay farther from joint limits.",
+#     "block_to_target_zone": "Increasing this weight makes the robot move the block closer to the target zone.",
+#     "zone_c_clearance": "Increasing this weight makes the robot stay farther from zone C.",
+#     "height_maintain": "Increasing this weight makes the robot maintain the target transport height better.",
+# }
 WEIGHT_UPDATE_PROMPT = {
-    "green_clearance": "Increasing this weight makes the robot stay farther from the green block.",
-    "velocity": "Increasing this weight makes the robot move faster.",
-    "collision_safety": "Increasing this weight makes the robot stay farther from obstacles.",
-    "joint_safety": "Increasing this weight makes the robot stay farther from joint limits.",
-    "block_to_target_zone": "Increasing this weight makes the robot move the block closer to the target zone.",
-    "zone_c_clearance": "Increasing this weight makes the robot stay farther from zone C.",
-    "height_maintain": "Increasing this weight makes the robot maintain the target transport height better.",
+    "green_clearance": "POSITIVE mu (+) makes the robot stay FARTHER from the green block. NEGATIVE mu (-) lets the robot get CLOSER to the green block.",
+    "velocity": "POSITIVE mu (+) makes the robot move FASTER. NEGATIVE mu (-) makes the robot move SLOWER.",
+    "collision_safety": "POSITIVE mu (+) makes the robot more cautious around obstacles. NEGATIVE mu (-) allows closer proximity.",
+    "joint_safety": "POSITIVE mu (+) makes the robot avoid joint limits more. NEGATIVE mu (-) allows more extreme joint positions.",
+    "block_to_target_zone": "POSITIVE mu (+) prioritizes moving the block to the target zone. NEGATIVE mu (-) deprioritizes task completion.",
+    "zone_c_clearance": "POSITIVE mu (+) makes the robot stay FARTHER from zone C. NEGATIVE mu (-) lets the robot get CLOSER to zone C.",
+    "height_maintain": "POSITIVE mu (+) makes the robot maintain transport height better. NEGATIVE mu (-) allows more vertical drift.",
 }
-
 def _log_llm_call(
     system_prompt: str,
     user_prompt: str,

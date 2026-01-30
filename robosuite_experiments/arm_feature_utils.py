@@ -401,18 +401,23 @@ def get_feature_descriptions(include_red_dist=False, include_zones=False):
         descriptions["distance_to_red_block"] = "Distance from end effector to the red block (target object being moved). Higher values mean staying closer to the red block during manipulation."
     
     # Core features
+    # descriptions.update({
+    #     "green_clearance": "Clearance from the green block (obstacle). HIGHER values mean FARTHER from the obstacle. Increasing this weight makes the robot stay farther away; decreasing it makes the robot get closer.",
+    #     "velocity": "Speed of end effector movement. Higher values mean faster motion. Increasing this weight makes the robot move faster.",
+    #     "collision_safety": "Safety penalty for getting too close to obstacles. Higher values mean more conservative collision avoidance.",
+    #     "joint_safety": "Safety penalty for joint configurations near limits. Higher values mean more conservative joint movements.",
+    # })
     descriptions.update({
-        "green_clearance": "Clearance from the green block (obstacle). HIGHER values mean FARTHER from the obstacle. Increasing this weight makes the robot stay farther away; decreasing it makes the robot get closer.",
-        "velocity": "Speed of end effector movement. Higher values mean faster motion. Increasing this weight makes the robot move faster.",
-        "collision_safety": "Safety penalty for getting too close to obstacles. Higher values mean more conservative collision avoidance.",
-        "joint_safety": "Safety penalty for joint configurations near limits. Higher values mean more conservative joint movements.",
+        "green_clearance": "Distance from the green block (obstacle). POSITIVE weight change (+mu) makes robot stay FARTHER from green block. NEGATIVE weight change (-mu) lets robot get CLOSER to green block.",
+        "velocity": "End effector speed. POSITIVE weight change (+mu) makes robot move FASTER. NEGATIVE weight change (-mu) makes robot move SLOWER.",
+        "collision_safety": "Collision avoidance behavior. POSITIVE weight change (+mu) makes robot more cautious around obstacles. NEGATIVE weight change (-mu) allows closer proximity to obstacles.",
+        "joint_safety": "Joint limit avoidance. POSITIVE weight change (+mu) makes robot avoid joint limits more. NEGATIVE weight change (-mu) allows more extreme joint positions.",
     })
-    
     # Zone-based features (pick-and-place)
     if include_zones:
-        descriptions["block_to_target_zone"] = "Horizontal proximity of the red block to the GOAL target zone B (ignores height). Higher values mean the block is closer to where it needs to be placed in the X-Y plane. This is the key feature for SUCCESSFUL task completion during the transport phase."
-        descriptions["zone_c_clearance"] = "Clearance from obstacle zone C. HIGHER values mean FARTHER from zone C. Increasing this weight makes the robot stay farther away; decreasing it makes the robot get closer."
-        descriptions["height_maintain"] = "Height maintenance during transport. Higher values mean the end effector is closer to the target transport height. This prevents vertical drift during horizontal transport and ensures stable block carrying."
+        descriptions["block_to_target_zone"] = "Task completion priority. POSITIVE weight change (+mu) makes robot prioritize moving block to target zone B. NEGATIVE weight change (-mu) deprioritizes reaching the goal."
+        descriptions["zone_c_clearance"] = "Distance from obstacle zone C. POSITIVE weight change (+mu) makes robot stay FARTHER from zone C. NEGATIVE weight change (-mu) lets robot get CLOSER to zone C."
+        descriptions["height_maintain"] = "Transport height stability. POSITIVE weight change (+mu) makes robot maintain target height better. NEGATIVE weight change (-mu) allows more vertical drift."
     
     return descriptions
 
